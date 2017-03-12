@@ -50,7 +50,8 @@
         stroke: darkorange;
         stroke-width: 3px;
       }
-    </style>
+
+      </style>
   </head>
   <body>
     <div class="container">
@@ -58,14 +59,37 @@
         <h1 style="margin-top: 10px;">Rent Report</h1>
       </div>
       <div class="row">
-        <div class="col-md-4">
+        <div class="col-md-6">
           <form class="form-horizontal" role="form">
             <div class="form-group">
               <label for="address"">Address:</label>
               <input id="address" class="form-control" type="textbox" placeholder="New York, NY">
             </div>
             <div class="form-group">
-              <button type="button" class="btn btn-primary" onclick="on_get_report()">Get Report</button>
+              <label >Bedrooms:</label>
+              <div id="bedrooms">
+                <button id="br" type="button" class="btn btn-secondary" onclick="on_select('br', '')">Any</button>
+                <button id="br0" type="button" class="btn btn-secondary" onclick="on_select('br', '0')">Studio</button>
+                <button id="br1" type="button" class="btn btn-secondary" onclick="on_select('br', '1')">One</button>
+                <button id="br2" type="button" class="btn btn-secondary" onclick="on_select('br', '2')">Two</button>
+                <button id="br3" type="button" class="btn btn-secondary" onclick="on_select('br', '3')">Three</button>
+                <button id="br4" type="button" class="btn btn-secondary" onclick="on_select('br', '4')">Four or more</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label >Bathrooms:</label>
+              <div>
+                <button id="ba" type="button" class="btn btn-secondary" onclick="on_select('ba', '')">Any</button>
+                <button id="ba1" type="button" class="btn btn-secondary" onclick="on_select('ba', '1')">1</button>
+                <button id="ba1_5" type="button" class="btn btn-secondary" onclick="on_select('ba', '1_5')">1.5</button>
+                <button id="ba2" type="button" class="btn btn-secondary" onclick="on_select('ba', '2')">2</button>
+                <button id="ba2_5" type="button" class="btn btn-secondary" onclick="on_select('ba', '2_5')">2.5</button>
+                <button id="ba3" type="button" class="btn btn-secondary" onclick="on_select('ba', '3')">3 or more</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <button type="button" class="btn btn-primary" onclick="on_get_report()">Get Report
+              </button>
             </div>
           </form>
           <div class="row">
@@ -75,7 +99,7 @@
             <label id="l_matches"></label>
           </div>
         </div>
-        <div class="col-md-8">
+        <div class="col-md-6">
           <div id="map"></div>
           <div align="right">
             <label id="l_latlng"></label>
@@ -86,6 +110,8 @@
     <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
     <script src="http://d3js.org/d3.v4.min.js"></script>
     <script src="/underscore-min.js"></script>
+    <script src="/stringutils.js"></script>
+    <script src="/mapstyle.js"></script>
     <script>
       var map = null;
       var auto_complete;
@@ -93,12 +119,10 @@
       var info_window = null;
       var place = null;
 
-      var report_data = null;      
       var svg = null;
-      var hist = { 
-        height : 200, 
-        margin : { top: 0, left: 0, bottom: 30, right: 30 }
-      };
+
+      var criteria = { loc: null, br : null, ba : null };
+      var report = null;      
 
       /*  Set up the page */
 
@@ -107,6 +131,7 @@
         //  Create map and center it onTimes Square
 
         map = new google.maps.Map(document.getElementById('map'), {
+          styles: map_style,
           center: {lat: 40.759, lng: -73.985},
           zoom: 13
         });
@@ -127,29 +152,20 @@
         auto_complete = new google.maps.places.Autocomplete(input, options);
         google.maps.event.addListener(auto_complete, "place_changed", on_place_changed);
 
-        //  Create chart object
-
-        svg = d3.select("#hist")
-        .append("svg")
-          .attr("width", "100%")
-          .attr("height", hist.height + hist.margin.top + hist.margin.bottom)
-        .append("g")
-          .attr("transform", "translate(" + hist.margin.left + "," + hist.margin.top + ")");
-
-        //  Listen for resize events
+       //  Listen for resize events
 
         window.addEventListener("resize", on_resize)
       }
 
-      /*  Handle autocomplete */
+      /*  Handle Address autocomplete */
 
       function on_place_changed() {
-        place = auto_complete.getPlace();
+        var place = auto_complete.getPlace();
         var location = place.geometry.location;
 
         //  Move map
 
-        map.panTo(place.geometry.location);
+        map.panTo(location);
 
         //  Show/move marker
 
@@ -189,16 +205,42 @@
 
         //  Show the report
 
-        get_report(location)
+        criteria.loc = location;
+        get_report()
       }
 
+      /*  Activate a button */
+
+      function set_active(id, active) {
+        d3.select(id)
+          .attr("class", active ? "btn btn-primary active" : "btn btn-secondary")
+          .attr("aria-pressed", active ? "true" : "false")
+      }
+
+      /*  Handle criteria button press */
+
+      function on_select(setting, value) {
+        if (criteria[setting] != value) {
+          if (criteria[setting] != null) {
+            set_active("#" + setting + criteria[setting], false)
+          }
+          set_active("#" + setting + value, true);
+          criteria[setting] = value
+          get_report()
+        }
+      }
+
+      /*  Handle window resize */
+
       function on_resize() {
-        redraw({ data : report_data, duration : 0 })
+        if (svg != null) {
+          redraw({ data : report, duration : 0 })
+        }
       }
       /*  Handle report button */
 
       function on_get_report() {
-        get_report(place.geometry.location);
+        get_report();
       }
 
       /*  (Re)draw price chart */
@@ -209,9 +251,25 @@
         var data = options.data;
         var duration = options.duration;
 
+        //  Create chart object
+
+        var params = { 
+          margin : { top: 0, left: 0, bottom: 30, right: 30 },
+          height : 200
+        };
+
+        if (svg == null) {
+          svg = d3.select("#hist")
+          .append("svg")
+            .attr("width", "100%")
+            .attr("height", params.height + params.margin.top + params.margin.bottom)
+          .append("g")
+            .attr("transform", "translate(" + params.margin.left + "," + params.margin.top + ")");
+        }
+
         var element = document.getElementById("hist");
-        var width = element.offsetWidth - (hist.margin.left + hist.margin.right);
-        var height = element.offsetHeight - (hist.margin.top + hist.margin.bottom);
+        var width = element.offsetWidth - (params.margin.left + params.margin.right);
+        var height = element.offsetHeight - (params.margin.top + params.margin.bottom);
 
         var xMin = 600;
         var xMax = 10000
@@ -253,7 +311,7 @@
           .range([height, 0]);
 
         svg.selectAll("path")
-          .data([data])
+          .data([null])
           .enter().append("path")
           .attr("class", "line")
           .attr("style", "opacity:0;");
@@ -269,7 +327,7 @@
           .attr("style", "opacity:1;");
 
         svg.selectAll(".axis")
-          .data([0])
+          .data([null])
           .enter().append("g")
           .attr("class", "axis axis--x");
 
@@ -283,11 +341,13 @@
 
       /*  Run report */
 
-      function get_report(location) {
-        var lat = round(location.lat(), 4);
-        var lng = round(location.lng(), 4);
-        var args = "{ \"latitude\": \"" + lat + "\", \"longitude\": \"" + lng + "\"}";
+      function get_report() {
+        var lat = round(criteria.loc.lat(), 4);
+        var lng = round(criteria.loc.lng(), 4);
+        var args = '{"latitude": "{0}", "longitude": "{1}", "bedrooms": "{2}", "bathrooms": "{3}"}'.format(lat, 
+          lng, criteria.br ? criteria.br : "", criteria.ba ? criteria.ba.replace("_", ".") : "");
         console.log("POST", args);
+
         $.ajax({
           type: "POST",
           contentType: "application/json; charset=utf-8",
@@ -297,8 +357,8 @@
           data: args,
           success: function (data) {
             document.getElementById('l_matches').innerHTML = data.length + " matches";
-            report_data = data;
-            redraw({ data : report_data});
+            redraw({data : data});
+            report = data;
           },
           error: function (result) {
             console.log("error");
