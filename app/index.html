@@ -51,6 +51,14 @@
         stroke-width: 3px;
       }
 
+      .axis--grid .domain {
+        fill: #ddd;
+        stroke: none;
+      }
+      .axis--x .domain,
+      .axis--grid .tick {
+        stroke: #fff;
+      }
       </style>
   </head>
   <body>
@@ -95,6 +103,9 @@
           <div class="row">
             <div id="hist"></div>
           </div>
+          <div class = "row">
+            <div id="meter"></div>
+          </div>
           <div class="row">
             <label id="l_matches"></label>
           </div>
@@ -114,12 +125,18 @@
     <script src="/mapstyle.js"></script>
     <script>
       var map = null;
-      var auto_complete;
+      var auto_complete = null;
+      var geocoder = null;
       var marker = null;
+      var circle = null;
+      var circle_params = { 
+        strokeColor: '#0000FF', strokeOpacity: 0.8, strokeWeight: 1, fillColor: '#0000FF', fillOpacity: 0.15
+      }
       var info_window = null;
       var place = null;
 
-      var svg = null;
+      var hist_svg = null;
+      var meter_svg = null;
 
       var criteria = { loc: null, br : null, ba : null };
       var report = null;      
@@ -133,7 +150,8 @@
         map = new google.maps.Map(document.getElementById('map'), {
           styles: map_style,
           center: {lat: 40.759, lng: -73.985},
-          zoom: 13
+          zoom: 13,
+          draggableCursor: 'crosshair'
         });
 
         //  Set default bounds to five boroughs of New York
@@ -152,9 +170,49 @@
         auto_complete = new google.maps.places.Autocomplete(input, options);
         google.maps.event.addListener(auto_complete, "place_changed", on_place_changed);
 
-       //  Listen for resize events
+        //  Listen for events
 
-        window.addEventListener("resize", on_resize)
+        window.addEventListener("resize", on_resize); // window resize
+        map.addListener('click', on_map_click); // map click
+      }
+
+      /*  Handle map click */
+
+      function on_map_click(e) {
+        
+        //  Show coordinates
+
+        var lat = round(e.latLng.lat(), 4);
+        var lng = round(e.latLng.lng(), 4);
+        document.getElementById("l_latlng").innerHTML = lat + ", " + lng;
+
+        //  Show marker
+
+        var marker = set_marker(e.latLng);
+
+        //  Show info popup
+
+        var latlng = {lat: lat, lng: lng};
+        get_geocoder().geocode({"location" : latlng}, function(results, status) {
+          var info_address = "";
+          if (status == "OK") {
+            if (results[0]) {
+                document.getElementById("address").value = results[0].formatted_address;
+                info_address = compose_address(results[0].address_components);
+            } else {
+              console.log("No results found");
+            }
+          } else {
+            console.log("Geocoder failed:", status);
+          }
+          set_info_window(marker, info_address);
+        });
+
+        //  Show the report
+
+        console.log(e.latLng);
+        criteria.loc = e.latLng;
+        get_report()
       }
 
       /*  Handle Address autocomplete */
@@ -167,35 +225,13 @@
 
         map.panTo(location);
 
-        //  Show/move marker
+        //  Show marker
 
-        if (marker == null) {
-          marker = new google.maps.Marker({ map: map, position: location });
-        } else {
-          marker.setPosition(location);
-        }
+        var marker = set_marker(location);
 
         //  Show info popup
 
-        function address_component(index) {
-          if (place.address_components[index] && place.address_components[index].short_name) {
-            return place.address_components[index].short_name;
-          } else {
-            return "";
-          }
-        }
-
-        var street_address = [[address_component(0), address_component(1)].join(" "), 
-          address_component(2)].join(", ");
-        if (street_address != "") {
-          if (!info_window) {
-            info_window = new google.maps.InfoWindow;
-          }
-          info_window.setContent(street_address);
-          info_window.open(map, marker);
-        } else if (info_window) {
-          info_window.close();
-        }
+        set_info_window(marker, compose_address(place.address_components));
 
         //  Show coordinates
 
@@ -205,16 +241,9 @@
 
         //  Show the report
 
+        console.log(location)
         criteria.loc = location;
         get_report()
-      }
-
-      /*  Activate a button */
-
-      function set_active(id, active) {
-        d3.select(id)
-          .attr("class", active ? "btn btn-primary active" : "btn btn-secondary")
-          .attr("aria-pressed", active ? "true" : "false")
       }
 
       /*  Handle criteria button press */
@@ -233,10 +262,11 @@
       /*  Handle window resize */
 
       function on_resize() {
-        if (svg != null) {
+        if (hist_svg != null) {
           redraw({ data : report, duration : 0 })
         }
       }
+
       /*  Handle report button */
 
       function on_get_report() {
@@ -248,28 +278,31 @@
       function redraw(options) {
         _.defaults(options, { duration : 250 });
 
-        var data = options.data;
+        var listings = options.data.listings;
+        var prediction = options.data.prediction;
         var duration = options.duration;
 
-        //  Create chart object
+        //  Chart
 
-        var params = { 
+        var hist_params = { 
           margin : { top: 0, left: 0, bottom: 30, right: 30 },
           height : 200
         };
 
-        if (svg == null) {
-          svg = d3.select("#hist")
+        if (hist_svg == null) {
+          hist_svg = d3.select("#hist")
           .append("svg")
             .attr("width", "100%")
-            .attr("height", params.height + params.margin.top + params.margin.bottom)
+            .attr("height", hist_params.height + hist_params.margin.top + hist_params.margin.bottom)
           .append("g")
-            .attr("transform", "translate(" + params.margin.left + "," + params.margin.top + ")");
+            .attr("transform", "translate(" + hist_params.margin.left + "," + hist_params.margin.top + ")");
         }
 
         var element = document.getElementById("hist");
-        var width = element.offsetWidth - (params.margin.left + params.margin.right);
-        var height = element.offsetHeight - (params.margin.top + params.margin.bottom);
+        var width = element.offsetWidth - (hist_params.margin.left + hist_params.margin.right);
+        var height = element.offsetHeight - (hist_params.margin.top + hist_params.margin.bottom);
+
+        //  Chart: bars
 
         var xMin = 600;
         var xMax = 10000
@@ -280,13 +313,13 @@
         var bins = d3.histogram()
           .domain(x.domain())
           .thresholds(d3.range(xMin, xMax, 200))
-          (data.map(function(d) { return d.price; }));
+          (listings.map(function(d) { return d.price; }));
 
         var y = d3.scaleLinear()
           .domain([0, d3.max(bins, function(d) { return d.length; })])
           .range([height, 0]);
 
-        var bar = svg.selectAll(".bar")
+        var bar = hist_svg.selectAll(".bar")
           .data(bins)
         .enter().append("g")
           .attr("class", "bar")
@@ -295,57 +328,180 @@
 
         bar.exit().remove();
 
-        svg.selectAll("g")
+        hist_svg.selectAll("g")
           .data(bins)
           .transition().duration(duration)
           .attr("transform", function(d) { return "translate(" + x(d.x0) + "," + y(d.length) + ")"});
 
-        svg.selectAll("rect")
+        hist_svg.selectAll("rect")
           .data(bins)
           .transition().duration(duration)
           .attr("width", function(d) { return x(d.x1) - x(d.x0) - 1; })
           .attr("height", function(d) { return height - y(d.length); });
 
-        var yPDF = d3.scaleLinear()
-          .domain([0, 1.1 * d3.max(data, function(d) { return d.pdf; })])
-          .range([height, 0]);
+        //  Chart: plot
 
-        svg.selectAll("path")
+        hist_svg.selectAll("path")
           .data([null])
           .enter().append("path")
           .attr("class", "line")
           .attr("style", "opacity:0;");
 
-        svg.select("path")
-          .datum(data)
-          .attr('d', d3.line()
-            .curve(d3.curveBasis)
-            .x(function(d) { return x(d.price); })
-            .y(function(d) { return yPDF(d.pdf); })
-            )
-          .transition().duration(duration)
-          .attr("style", "opacity:1;");
+        if (listings.length > 0 && !listings[0].pdf) {
+          hist_svg.select("path")
+            .attr("style", "opacity:0;");
+        } else {
+          var yPDF = d3.scaleLinear()
+            .domain([0, 1.01 * d3.max(listings, function(d) { return d.pdf; })])
+            .range([height, 0]);
 
-        svg.selectAll(".axis")
+          hist_svg.select("path")
+            .datum(listings)
+            .attr('d', d3.line()
+              .curve(d3.curveBasis)
+              .x(function(d) { return x(d.price); })
+              .y(function(d) { return yPDF(d.pdf); })
+              )
+            .transition().duration(duration)
+            .attr("style", "opacity:1;");
+        }
+
+        //  Chart: axis
+
+        hist_svg.selectAll(".axis")
           .data([null])
           .enter().append("g")
           .attr("class", "axis axis--x");
 
-        svg.select(".axis")
+        hist_svg.select(".axis")
           .attr("transform", "translate(0," + height + ")")
           .transition().duration(duration)
           .call(d3.axisBottom(x));
+
+        //  Rent meter
+
+        var meter_params = {
+          margin : { top: 5, left: 0, bottom: 5, right: 0},
+          height : 30
+        }
+        width = document.getElementById("meter").offsetWidth;
+        height = meter_params.height + meter_params.margin.top + meter_params.margin.bottom;
+        margin = meter_params.margin;
+
+        if (meter_svg == null) {
+          meter_svg = d3.select("#meter")
+          .append("svg")
+            .attr("width",  width)
+            .attr("height", height)
+          .append("g")
+            .attr("transform", "translate(" + margin.left + "," + margin.right + ")");
+
+          meter_svg.append("g")
+            .attr("class", "axis axis--grid")
+            .attr("transform", "translate(0," + (meter_params.height + margin.top) + ")")
+            .call(d3.axisBottom(x)
+                .ticks(d3.range(xMin, xMax, 200))
+                .tickSize(-meter_params.height)
+                .tickFormat(function() { return null; }));
+          // .selectAll(".tick")
+          //   .classed("tick--minor", function(d) { return d.getHours(); });
+
+          meter_svg.append("rect")
+            .attr("rx", 0)
+            .attr("ry", 0)
+            .attr("x", 0)
+            .attr("y", 0)
+            .attr("width", 0)
+            .attr("height", height)
+            .attr("opacity", 0.5)
+            .style("fill", "darkorange")
+        }
+
+        meter_svg.selectAll("rect")
+          .data([prediction])
+          .transition().duration(duration)
+          .attr("x", function(d) { return x(d.predict - d.std); })
+          .attr("width", function(d) { return x(2 * d.std) - x(0); })
       }
 
       /*  Helper functions */
 
+      /*  Compose address for info popup */
+
+      function compose_address(components) {
+        function get_component(index) {
+          if (components[index] && components[index].short_name) {
+            return components[index].short_name;
+          } else {
+            return "";
+          }
+        }
+        return [[get_component(0), get_component(1)].join(" "), get_component(2)].join(", ") 
+      }
+
+      /*  Activate/Deactivate a button */
+
+      function set_active(id, active) {
+        d3.select(id)
+          .attr("class", active ? "btn btn-primary active" : "btn btn-secondary")
+          .attr("aria-pressed", active ? "true" : "false")
+      }
+
+      /*  Show/move map marker */
+
+      function set_marker(loc) {
+        if (marker == null) {
+          marker = new google.maps.Marker({ map: map, position: loc });
+        } else {
+          marker.setPosition(loc)
+        }
+        if (circle == null) {
+          circle_params.map = map;
+          circle_params.center = loc;
+          circle_params.radius = 500;
+          circle = new google.maps.Circle(circle_params);
+        } else {
+          circle.setCenter(loc);
+        }
+        return marker;
+      }
+
+      /*  Set info window text and location */
+
+      function set_info_window(marker, text) {
+        if (text) {
+          if (!info_window) {
+            info_window = new google.maps.InfoWindow;
+          }
+          info_window.setContent(text);
+          info_window.open(map, marker);
+        } else if (info_window) {
+          info_window.close();
+        }
+      }
+
+      /*  Get Google Geocoder */
+
+      function get_geocoder() {
+        if (geocoder == null) {
+          geocoder = new google.maps.Geocoder();
+        }
+        return geocoder;        
+      }
+
       /*  Run report */
 
       function get_report() {
-        var lat = round(criteria.loc.lat(), 4);
-        var lng = round(criteria.loc.lng(), 4);
-        var args = '{"latitude": "{0}", "longitude": "{1}", "bedrooms": "{2}", "bathrooms": "{3}"}'.format(lat, 
-          lng, criteria.br ? criteria.br : "", criteria.ba ? criteria.ba.replace("_", ".") : "");
+        var args = { 
+          "latitude": round(criteria.loc.lat(), 4), 
+          "longitude": round(criteria.loc.lng(), 4)
+        }
+        if (criteria.br) {
+          args["bedrooms"] = parseInt(criteria.br)
+        }
+        if (criteria.ba) {
+          args["bathrooms"] = parseFloat(criteria.ba.replace("_", "."))
+        }
         console.log("POST", args);
 
         $.ajax({
@@ -354,14 +510,14 @@
           url: "/submit",
           dataType: "json",
           async: true,
-          data: args,
+          data: JSON.stringify(args),
           success: function (data) {
-            document.getElementById('l_matches').innerHTML = data.length + " matches";
+            document.getElementById('l_matches').innerHTML = data.listings.length + " matches";
             redraw({data : data});
             report = data;
           },
           error: function (result) {
-            console.log("error");
+            console.log("error:", result);
           }
         });
       }
