@@ -59,6 +59,12 @@
       .axis--grid .tick {
         stroke: #fff;
       }
+
+      .hexagon {
+        stroke: #000;
+        stroke-width: .5px;
+        opacity: 0.5;
+      }
       </style>
   </head>
   <body>
@@ -120,9 +126,10 @@
     </div>
     <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
     <script src="http://d3js.org/d3.v4.min.js"></script>
-    <script src="/underscore-min.js"></script>
-    <script src="/stringutils.js"></script>
-    <script src="/mapstyle.js"></script>
+    <script src="underscore-min.js"></script>
+    <script src="stringutils.js"></script>
+    <script src="mapstyle.js"></script>
+    <script src="d3.hexbin.min.js"></script>
     <script>
       var map = null;
       var auto_complete = null;
@@ -140,6 +147,8 @@
 
       var criteria = { loc: null, br : null, ba : null };
       var report = null;      
+
+      var overlay = null;
 
       /*  Set up the page */
 
@@ -271,6 +280,100 @@
 
       function on_get_report() {
         get_report();
+
+        //  Add heatmap overlay
+
+        if (!overlay) {
+          overlay = new google.maps.OverlayView();
+          overlay.onAdd = on_add_overlay;
+          overlay.draw = on_draw_overlay;
+          overlay.setMap(map);
+        }
+      }
+
+      /*  Handle heatmap overlay */
+
+      var heat_svg = null;
+      function on_add_overlay() {
+        console.log("on_add_overlay()")
+        // var layer = d3.select(this.GetPanes().overlayLayer)
+        //   .append("div")
+        //   .attr("class", "heatmap")
+
+        heat_svg = d3.select(this.getPanes().overlayLayer)
+          .append("svg")
+          .attr("class", "hex")
+      }
+
+      var levels = {}
+      var curLevel = null;
+
+      function on_draw_overlay() {
+        console.log("on_draw_overlay()")
+
+        var zoom = map.getZoom();
+        var bounds = new google.maps.LatLngBounds();
+        d3.map(report.listings, function(d) {
+          var latlng = new google.maps.LatLng(d.latitude, d.longitude);
+          bounds.extend(latlng);
+        });
+
+        var projection = this.getProjection();
+        var bottomLeft = projection.fromLatLngToContainerPixel(bounds.getSouthWest());
+        var topRight = projection.fromLatLngToContainerPixel(bounds.getNorthEast());
+        var sizeX = topRight.x - bottomLeft.x;
+        var sizeY = bottomLeft.y - topRight.y;
+
+        console.log("bounds:", bottomLeft.x, bottomLeft.y, topRight.x, topRight.y)
+
+        var hexRadius = 5; 
+        var hexPad = 100;
+        var layout = d3.hexbin().radius(hexRadius);
+        var cscale = d3.scaleLinear().domain([1000, 10000]).range(["#00FF00", "#FFA500"]);
+
+        heat_svg
+          .attr("width", Math.abs(sizeX))
+          .attr("height",  Math.abs(sizeY))
+          .style("margin-left", bottomLeft.x)
+          .style("margin-top", topRight.y);
+
+        if (!(zoom in levels)) {
+          levels[zoom] = heat_svg.append("g").attr("class", "zoom-" + zoom);
+          generate_hexbins(levels[zoom])
+          levels[zoom].attr("transform", "translate(" + -bottomLeft.x + "," + -topRight.y + ")")
+        }
+
+        if (curLevel) {
+          curLevel.attr("style", "display:none;")
+        }
+        curLevel = levels[zoom];
+        curLevel.style("display", "inline");
+
+
+        function generate_hexbins(container) {
+          console.log("generate_hexbins")
+
+          var hexData = d3.entries(report.listings).map(function(d) {
+            var latlng = new google.maps.LatLng(d.value.latitude, d.value.longitude);
+            var px = projection.fromLatLngToDivPixel(latlng);
+            return [px.x, px.y, d]
+          }, this);
+
+          var bins = layout(hexData);
+          container.selectAll(".hexagon")
+            .data(bins)
+          .enter().append("path")
+            .attr("class", "hexagon")
+            .attr("fill", function(d) {
+                var avg = d3.median(d, function(d) {
+                  return +d[2].value.price;
+                })
+                console.log(avg, cscale(avg));
+                return cscale(avg);
+            })
+            .attr("d", function(d) { return layout.hexagon(hexRadius); })
+            .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+        }
       }
 
       /*  (Re)draw price chart */
