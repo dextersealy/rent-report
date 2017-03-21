@@ -61,8 +61,7 @@
       }
 
       .hexagon {
-        stroke: #000;
-        stroke-width: .5px;
+        stroke: none;
         opacity: 0.5;
       }
       </style>
@@ -136,9 +135,7 @@
       var geocoder = null;
       var marker = null;
       var circle = null;
-      var circle_params = { 
-        strokeColor: '#0000FF', strokeOpacity: 0.8, strokeWeight: 1, fillColor: '#0000FF', fillOpacity: 0.15
-      }
+
       var info_window = null;
       var place = null;
 
@@ -149,12 +146,15 @@
       var report = null;      
 
       var overlay = null;
+      var heat_svg = null;
+      var curLevel = null;
+      var levels = {}
 
       /*  Set up the page */
 
       function init() {
 
-        //  Create map and center it onTimes Square
+        //  Create map and center it on Times Square
 
         map = new google.maps.Map(document.getElementById('map'), {
           styles: map_style,
@@ -183,6 +183,10 @@
 
         window.addEventListener("resize", on_resize); // window resize
         map.addListener('click', on_map_click); // map click
+
+        //  Show the heat map
+
+        init_heat_map()
       }
 
       /*  Handle map click */
@@ -258,78 +262,165 @@
       /*  Handle criteria button press */
 
       function on_select(setting, value) {
-        if (criteria[setting] != value) {
-          if (criteria[setting] != null) {
-            set_active("#" + setting + criteria[setting], false)
-          }
-          set_active("#" + setting + value, true);
-          criteria[setting] = value
-          get_report()
+
+        //  If already set, punt
+
+        if (criteria[setting] == value) {
+          return;
         }
+
+        //  Clear current selection
+
+        if (criteria[setting] != null) {
+          set_active("#" + setting + criteria[setting], false)
+        }
+
+        //  Select button and generate the report
+
+        set_active("#" + setting + value, true);
+        criteria[setting] = value
+        get_report()
       }
 
       /*  Handle window resize */
 
       function on_resize() {
-        if (hist_svg != null) {
-          redraw({ data : report, duration : 0 })
+
+        //  If not showing histogram, punt
+
+        if (hist_svg == null) {
+          return;
         }
+
+        //  Redraw histogram 
+
+        redraw({ data : report, duration : 0 })
       }
 
       /*  Handle report button */
 
       function on_get_report() {
         get_report();
+      }
 
-        //  Add heatmap overlay
+      function get_report() {
 
-        if (!overlay) {
-          overlay = new google.maps.OverlayView();
-          overlay.onAdd = on_add_overlay;
-          overlay.draw = on_draw_overlay;
-          overlay.setMap(map);
+        //  Collect report criteria
+
+        var args = {};
+        if (criteria.loc) {
+          args["latitude"] = round(criteria.loc.lat(), 4);
+          args["longitude"] = round(criteria.loc.lng(), 4)
         }
+        if (criteria.br) {
+          args["bedrooms"] = parseInt(criteria.br);
+        }
+        if (criteria.ba) {
+          args["bathrooms"] = parseFloat(criteria.ba.replace("_", "."))
+        }
+
+        //  Request report from server
+
+        console.log("POST", args);
+        $.ajax({
+          type: "POST",
+          contentType: "application/json; charset=utf-8",
+          url: "/submit",
+          dataType: "json",
+          async: true,
+          data: JSON.stringify(args),
+          success: function (data) {
+            //  Updates # matches label
+            document.getElementById('l_matches').innerHTML = data.listings.length + " matches";
+            //  Show report
+            redraw({data : data});
+            report = data;
+          },
+          error: function (result) {
+            console.log("error:", result);
+          }
+        });
       }
 
       /*  Handle heatmap overlay */
 
-      var heat_svg = null;
-      function on_add_overlay() {
-        console.log("on_add_overlay()")
-        // var layer = d3.select(this.GetPanes().overlayLayer)
-        //   .append("div")
-        //   .attr("class", "heatmap")
+      function init_heat_map() {
 
-        heat_svg = d3.select(this.getPanes().overlayLayer)
-          .append("svg")
-          .attr("class", "hex")
+        //  If already showing, punt
+
+        if (overlay) {
+          return
+        }
+
+        //  Request data from server
+
+        $.ajax({
+          type: "POST",
+          contentType: "application/json; charset=utf-8",
+          url: "/submit",
+          dataType: "json",
+          async: true,
+          data: JSON.stringify({}),
+          success: function (data) {
+
+            //  Create map overlay
+
+            overlay = new google.maps.OverlayView();
+
+            //  Set up callbacks
+
+            overlay.onAdd = function() {
+              heat_svg = d3.select(this.getPanes().overlayLayer)
+                .append("svg")
+                .attr("class", "hex")
+            };
+
+            overlay.draw = function() {
+              on_draw_overlay(data);
+            };
+
+            //  Bind overlay to map
+
+            overlay.setMap(map);
+          },
+          error: function (result) {
+            console.log("error:", result);
+          }
+        });
       }
 
-      var levels = {}
-      var curLevel = null;
-
-      function on_draw_overlay() {
-        console.log("on_draw_overlay()")
+      function on_draw_overlay(data) {
+        console.log('drawing overlay')
 
         var zoom = map.getZoom();
+        if (curLevel) {
+          if (curLevel === levels[zoom]) {
+            return
+          }
+          curLevel.attr("style", "display:none;")
+        }
+
+        if (zoom in levels) {
+          curLevel = levels[zoom];
+          curLevel.style("display", "inline");
+          return;
+        }
+
         var bounds = new google.maps.LatLngBounds();
-        d3.map(report.listings, function(d) {
+        d3.map(data.listings, function(d) {
           var latlng = new google.maps.LatLng(d.latitude, d.longitude);
           bounds.extend(latlng);
         });
 
-        var projection = this.getProjection();
+        var projection = overlay.getProjection();
         var bottomLeft = projection.fromLatLngToContainerPixel(bounds.getSouthWest());
         var topRight = projection.fromLatLngToContainerPixel(bounds.getNorthEast());
         var sizeX = topRight.x - bottomLeft.x;
         var sizeY = bottomLeft.y - topRight.y;
 
-        console.log("bounds:", bottomLeft.x, bottomLeft.y, topRight.x, topRight.y)
-
         var hexRadius = 5; 
-        var hexPad = 100;
         var layout = d3.hexbin().radius(hexRadius);
-        var cscale = d3.scaleLinear().domain([1000, 10000]).range(["#00FF00", "#FFA500"]);
+        var cscale = d3.scaleLinear().domain([1000, 5000]).range(["#00FF00", "#FFA500"]);
 
         heat_svg
           .attr("width", Math.abs(sizeX))
@@ -337,43 +428,30 @@
           .style("margin-left", bottomLeft.x)
           .style("margin-top", topRight.y);
 
-        if (!(zoom in levels)) {
-          levels[zoom] = heat_svg.append("g").attr("class", "zoom-" + zoom);
-          generate_hexbins(levels[zoom])
-          levels[zoom].attr("transform", "translate(" + -bottomLeft.x + "," + -topRight.y + ")")
-        }
+        curLevel = levels[zoom] = heat_svg.append("g")
+          .attr("class", "zoom-" + zoom)
+          .attr("transform", "translate(" + -bottomLeft.x + "," + -topRight.y + ")");
 
-        if (curLevel) {
-          curLevel.attr("style", "display:none;")
-        }
-        curLevel = levels[zoom];
-        curLevel.style("display", "inline");
+        var hexData = d3.entries(data.listings).map(function(d) {
+          var latlng = new google.maps.LatLng(d.value.latitude, d.value.longitude);
+          var px = projection.fromLatLngToDivPixel(latlng);
+          return [px.x, px.y, d]
+        }, this);
 
+        var bins = layout(hexData);
 
-        function generate_hexbins(container) {
-          console.log("generate_hexbins")
-
-          var hexData = d3.entries(report.listings).map(function(d) {
-            var latlng = new google.maps.LatLng(d.value.latitude, d.value.longitude);
-            var px = projection.fromLatLngToDivPixel(latlng);
-            return [px.x, px.y, d]
-          }, this);
-
-          var bins = layout(hexData);
-          container.selectAll(".hexagon")
-            .data(bins)
+        curLevel.selectAll(".hexagon")
+          .data(bins)
           .enter().append("path")
-            .attr("class", "hexagon")
-            .attr("fill", function(d) {
-                var avg = d3.median(d, function(d) {
-                  return +d[2].value.price;
-                })
-                console.log(avg, cscale(avg));
-                return cscale(avg);
-            })
-            .attr("d", function(d) { return layout.hexagon(hexRadius); })
-            .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
-        }
+          .attr("class", "hexagon")
+          .attr("fill", function(d) {
+              var avg = d3.median(d, function(d) {
+                return +d[2].value.price;
+              })
+              return cscale(avg);
+          })
+          .attr("d", function(d) { return layout.hexagon(hexRadius); })
+          .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
       }
 
       /*  (Re)draw price chart */
@@ -520,11 +598,16 @@
             .style("fill", "darkorange")
         }
 
-        meter_svg.selectAll("rect")
-          .data([prediction])
-          .transition().duration(duration)
-          .attr("x", function(d) { return x(d.predict - d.std); })
-          .attr("width", function(d) { return x(2 * d.std) - x(0); })
+        if (prediction) {
+          meter_svg.selectAll("rect")
+            .data([prediction])
+            .transition().duration(duration)
+            .attr("x", function(d) { return x(d.predict - d.std); })
+            .attr("width", function(d) { return x(2 * d.std) - x(0); })
+            meter_svg.style("display", "inline");
+          } else {
+            meter_svg.style("display", "none");
+          }
       }
 
       /*  Helper functions */
@@ -542,7 +625,7 @@
         return [[get_component(0), get_component(1)].join(" "), get_component(2)].join(", ") 
       }
 
-      /*  Activate/Deactivate a button */
+      /*  Activate/Deactivate button */
 
       function set_active(id, active) {
         d3.select(id)
@@ -559,9 +642,16 @@
           marker.setPosition(loc)
         }
         if (circle == null) {
-          circle_params.map = map;
-          circle_params.center = loc;
-          circle_params.radius = 500;
+          var circle_params = {
+            map: map,
+            center: loc,
+            radius: 500, 
+            strokeColor: '#0000FF', 
+            strokeOpacity: 0.8, 
+            strokeWeight: 1, 
+            fillColor: '#0000FF', 
+            fillOpacity: 0.15
+          }
           circle = new google.maps.Circle(circle_params);
         } else {
           circle.setCenter(loc);
@@ -590,39 +680,6 @@
           geocoder = new google.maps.Geocoder();
         }
         return geocoder;        
-      }
-
-      /*  Run report */
-
-      function get_report() {
-        var args = { 
-          "latitude": round(criteria.loc.lat(), 4), 
-          "longitude": round(criteria.loc.lng(), 4)
-        }
-        if (criteria.br) {
-          args["bedrooms"] = parseInt(criteria.br)
-        }
-        if (criteria.ba) {
-          args["bathrooms"] = parseFloat(criteria.ba.replace("_", "."))
-        }
-        console.log("POST", args);
-
-        $.ajax({
-          type: "POST",
-          contentType: "application/json; charset=utf-8",
-          url: "/submit",
-          dataType: "json",
-          async: true,
-          data: JSON.stringify(args),
-          success: function (data) {
-            document.getElementById('l_matches').innerHTML = data.listings.length + " matches";
-            redraw({data : data});
-            report = data;
-          },
-          error: function (result) {
-            console.log("error:", result);
-          }
-        });
       }
 
       /*  Round floating point number to X digits */

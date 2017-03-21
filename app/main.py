@@ -4,6 +4,7 @@ import math
 import os
 import sys
 import flask
+import flask_compress
 import geojson
 import pymongo
 import numpy as np
@@ -11,13 +12,27 @@ import pandas as pd
 import scipy.stats as stats
 import statsmodels.api as sm
 from statsmodels.sandbox.regression.predstd import wls_prediction_std
+import time
 
 #   Initialize globals
 
 app = flask.Flask(__name__)
+
+#   Configure Flask to not sort or prettify JSON because we're sending 
+#   lots of data
+
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+app.config['JSON_SORT_KEYS'] = False
+
+#   Compress Flask responses with gzip
+
+flask_compress.Compress(app)
+
+#   Globals
+
 mongo_collection = None
 
-#   Helper functions
+#   Helper function to report memory usage
 
 def report_memory_usage():
     result = {'peak' : 0, 'rss' : 0}
@@ -29,11 +44,38 @@ def report_memory_usage():
                 result[key] = int(parts[1]) // 1024
     print(', '.join(['{}: {}MB'.format(key, value) for key, value in result.items()]))
 
-def find(criteria, fields=None):
-    result = list(mongo_collection.find(criteria, fields))
-    if result and '_id' in result[0]:
+#   Decorator for caching results
+
+result_cache = {}
+def memoize(func):
+    global result_cache
+    def func_wrapper(*args, **kwargs):
+        key = tuple(' '.join([str(arg) for arg in args]))
+        if key in result_cache:
+            result = result_cache[key]
+        else:
+            result = func(*args, **kwargs)
+            result_cache[key] = result
+        return result
+
+    return func_wrapper
+    
+
+#   Database query
+
+@memoize
+def find(criteria, fields):
+    fields = { field: 1 for field in fields }
+    if not '_id' in fields:
+        fields['_id'] = 0
+
+    result = list(mongo_collection.find(criteria, fields).sort('price', pymongo.ASCENDING))
+
+    if fields['_id']:
         for r in result:
             r['_id'] = str(r['_id'])
+
+    print('\ncriteria = {}\nfields = {}\n{} results'.format(criteria, fields, len(result)))
     return result
 
 #   Predictor
@@ -84,20 +126,21 @@ def send_js(path):
 
 @app.route('/submit', methods=['POST'])
 def submit():
-    #	Retrieve data
+    #	Parse request
 
     data = flask.request.json
-    print(data)
 
-    #   Get listings
-    
-    criteria = {}
-    criteria['loc'] = { 
-        '$near' : {
-            '$geometry' : geojson.Point((float(data['longitude']), float(data['latitude']))), 
-            '$maxDistance' : data.get('distance', 500) 
+    criteria = {
+        'price' : { '$lt' : 1e5 }
+    }
+
+    if 'latitude' in data and 'longitude' in data:
+        criteria['loc'] = { 
+            '$near' : {
+                '$geometry' : geojson.Point((float(data['longitude']), float(data['latitude']))), 
+                '$maxDistance' : data.get('distance', 500) 
+                }
             }
-        }
 
     if 'bedrooms' in data:
         bedrooms = data['bedrooms']
@@ -107,12 +150,9 @@ def submit():
         bathrooms = data['bathrooms']
         criteria['bathrooms'] = bathrooms if bathrooms < 3.0 else { '$gte' : 3.0 }
 
-    print(criteria)
-
-    fields = data.get('fields', ['id_', 'loc', 'latitude', 'longitude', 'price'])
-    listings = find(criteria, fields)
-    listings = sorted([l for l in listings if l['price'] < 10000], key=lambda l: l['price'])
-    print('{} results'.format(len(listings)))
+    #   Get listings
+    
+    listings = find(criteria, data.get('fields', ['loc', 'latitude', 'longitude', 'price']))
 
     #   Get Probability Distribution
 
@@ -125,16 +165,21 @@ def submit():
         del pdf
 
 
-    #   Predict rect
+    #   Predict price
 
-    prediction = predict(data, listings)
-    print(prediction)
+    if 'loc' in criteria:
+        prediction = predict(data, listings)
+        print(prediction)
+    else:
+        prediction = None
 
     #	Package and return result
     
+    start = time.time()
     result = flask.jsonify(prediction=prediction, listings=listings)
     del listings, prices
-
+    
+    print("elapsed time:", time.time() - start)
     report_memory_usage()
     return result
 
@@ -143,7 +188,6 @@ def submit():
 def app_init():
     global mongo_collection
     mongo_client = pymongo.MongoClient('ec2-34-198-246-43.compute-1.amazonaws.com', 27017)
-#    mongo_collection = mongo_client.renthop.listings
     mongo_collection = mongo_client.renthop.listings
     print('Found {} listings'.format(mongo_collection.count()))
 
