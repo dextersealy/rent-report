@@ -6,13 +6,18 @@ import sys
 import flask
 import flask_compress
 import geojson
+import json
 import pymongo
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
 import statsmodels.api as sm
-from statsmodels.sandbox.regression.predstd import wls_prediction_std
 import time
+
+from collections import Counter
+from sklearn.linear_model import ElasticNetCV
+from statsmodels.sandbox.regression.predstd import wls_prediction_std
+from vincenty import vincenty
 
 #   Initialize globals
 
@@ -31,6 +36,8 @@ flask_compress.Compress(app)
 #   Globals
 
 mongo_collection = None
+canon = None
+top50 = None
 
 #   Helper function to report memory usage
 
@@ -64,54 +71,86 @@ def memoize(func):
 #   Database query
 
 @memoize
-def find(criteria, fields):
+def find(criteria, fields, limit=0):
     fields = { field: 1 for field in fields }
     if not '_id' in fields:
         fields['_id'] = 0
 
-    result = list(mongo_collection.find(criteria, fields).sort('price', pymongo.ASCENDING))
+    radius = 0.0
+    result = list(mongo_collection.find(criteria, fields).limit(limit))
+    if 'loc' in criteria:
+        center = criteria['loc']['$nearSphere']['$geometry']['coordinates']
+        radius = 1609.34 * vincenty((center[1], center[0]),  # convert miles to meters
+            (result[-1]['latitude'], result[-1]['longitude']))
 
     if fields['_id']:
         for r in result:
             r['_id'] = str(r['_id'])
 
-    print('\ncriteria = {}\nfields = {}\n{} results\n'.format(criteria, fields, len(result)))
-    return result
+    print('\ncriteria = {}\nfields = {}\n{} results ({:.2f} meters)\n'.format(criteria, 
+        fields, len(result), radius))
+    return sorted(result, key=lambda x: x['price']), radius
 
 #   Predictor
 
+def get_features_matrix(list_or_iter):
+    listings = []
+    for features in list_or_iter:
+        listings.append({})
+        for f in features.lower().replace('-', ' ').split('\n'):
+            f = canon.get(f, f)
+            if f in top50:
+                f_name = 'f_' + f.replace(' ', '_')
+                listings[-1][f_name] = 1    
+    return pd.DataFrame.from_dict(listings).fillna(0)
+
+
 def predict(obs, listings):
+    
     #   Put listings in DataFrame
 
-    columns = ['latitude', 'longitude', 'price']
+    columns = ['bedrooms', 'bathrooms', 'features', 'price']
     df = pd.DataFrame([[listing[col] for col in columns] for listing in listings], columns=columns)
-    df = df.drop(df[df.price>1e5].index) # drop high prices
+    df = df.join(get_features_matrix(df.features)).drop('features', axis=1)
+    print('{} rows, {} columns'.format(df.shape[0], df.shape[1]))
 
-    #   Fit OLS model
+    #   Fit model
 
-    X = sm.add_constant(df.drop('price', axis=1))
+    X = df.drop('price', axis=1)
     y = df['price']
-    ols = sm.OLS(y, X).fit()
+    model = ElasticNetCV(cv=3)
+    model.fit(X, np.log10(y))
+    resid = np.power(10, model.predict(X)) - y
 
     #   Predict observation
 
-    for col in columns[:-1]:
-        X.loc[0, col] = obs[col]
-    y_pred = ols.predict(X[:1])[0]
+    print(obs)
+    X.loc[0] = np.zeros(X.shape[1])
+    X.loc[0, 'bedrooms'] = obs['beds'][0] if 'beds' in obs else 1.0
+    X.loc[0, 'bathrooms'] = obs['bath'][0] if 'bath' in obs else 1.0
+    for section in ['unit', 'bldg']:
+        for feature in obs.get(section, []):
+            col = 'f_' + feature.replace(' ', '_')
+            print(col)
+            if col in X.columns:
+                X.loc[0, col] = 1.0
+
+    for col in X:
+        print('{} : {}'.format(col, X.loc[0, col]))
+
+    y_pred = np.power(10, model.predict(X[:1]))[0]
+    print("predicted: {}".format(y_pred))
 
     #   Compose result
 
-    prstd, iv_l, iv_u = wls_prediction_std(ols)
     result = { 
         'predict' : int(y_pred), 
-        'std' : int(prstd[0]), 
-        'lower' : int(iv_l[0]), 
-        'upper' : int(iv_u[0])
+        'std' : int(np.std(resid))
     }
 
     #   Clean up and return result
 
-    del df, X, y, prstd, iv_l, iv_u
+    del df, X, y
     return result
 
 #   Flask: data
@@ -129,7 +168,6 @@ def submit():
     #	Parse request
 
     data = flask.request.json
-    print(data)
 
     criteria = {
         'price' : { '$lt' : 1e5 }
@@ -137,7 +175,7 @@ def submit():
 
     if 'latitude' in data and 'longitude' in data:
         criteria['loc'] = { 
-            '$near' : {
+            '$nearSphere' : {
                 '$geometry' : geojson.Point((float(data['longitude']), float(data['latitude']))), 
                 '$maxDistance' : data.get('distance', 500) 
                 }
@@ -165,7 +203,8 @@ def submit():
 
     #   Get listings
 
-    listings = find(criteria, data.get('fields', ['loc', 'latitude', 'longitude', 'price']))
+    columns = ['loc', 'latitude', 'longitude', 'price', 'bedrooms', 'bathrooms', 'features']
+    listings, radius = find(criteria, columns, data.get('limit', 0))
 
     #   Get Probability Distribution
 
@@ -189,7 +228,7 @@ def submit():
     #	Package and return result
     
     start = time.time()
-    result = flask.jsonify(prediction=prediction, listings=listings)
+    result = flask.jsonify(prediction=prediction, listings=listings, radius=radius)
     del listings, prices
     
     print("elapsed time:", time.time() - start)
@@ -199,10 +238,32 @@ def submit():
 #   Initialize application
 
 def app_init():
+    global canon
+    global top50
+
+    #   Load listings
+
     global mongo_collection
     mongo_client = pymongo.MongoClient('ec2-34-198-246-43.compute-1.amazonaws.com', 27017)
     mongo_collection = mongo_client.renthop.listings
-    print('Found {} listings'.format(mongo_collection.count()))
+    print('{} listings'.format(mongo_collection.count()))
+
+    #   Load features
+
+    with open('synonyms.json') as fd:
+        synomyns = json.load(fd)
+
+    canon = {alias : term for s in synomyns for term, aliases in s.items() for alias in aliases}
+
+    all_features = Counter()
+    df = pd.DataFrame(list(mongo_collection.find({}, ['features'])))
+    for l in df.features:
+        unit_features = l.lower().replace('-', ' ').split('\n')
+        all_features.update([canon.get(f, f) for f in unit_features if f])
+
+    top50 = dict(all_features.most_common(50))
+    print('{} features'.format(len(all_features)))
+    del synomyns, df, all_features
 
 #   Main
 
@@ -223,6 +284,9 @@ def main(argv):
             host = arg
 
     app_init()
+
+    if debug:
+        app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 60;
     app.run(host=host, debug=debug)
 
 

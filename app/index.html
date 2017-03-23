@@ -182,22 +182,25 @@
 
         //  Create feature buttons
 
-        d3.json("features.json", function(error, button_groups) {
-          for (group_name in button_groups) {
-            button_titles = button_groups[group_name];
-            (function(group_name) {
-              d3.select("#" + group_name).selectAll("button")
-                .data(button_titles)
+        d3.json("features.json", function(error, features) {
+          for (section in features) {
+            if (section == "version") {
+              continue;
+            }
+            buttons = features[section];
+            (function(section) {
+              d3.select("#" + section).selectAll("button")
+                .data(buttons)
                 .enter().append("button")
                 .html(function(d) { return d; })
                 .attr("type", "button")
                 .attr("class", "btn btn-secondary btn-sm")
-                .attr("id", function(d) { return get_button_id(group_name, d); })
+                .attr("id", function(d) { return get_button_id(section, d); })
                 .style("margin-right", "2pt")
                 .style("margin-bottom", "2pt")
                 .style("padding", "3pt")
-                .on("click", function(d) { on_select(group_name, d) });
-              })(group_name);
+                .on("click", function(d) { on_select(section, d) });
+              })(section);
           }
         });
 
@@ -241,7 +244,6 @@
 
         //  Show the report
 
-        console.log(e.latLng);
         criteria.loc = e.latLng;
         get_report()
       }
@@ -272,7 +274,6 @@
 
         //  Show the report
 
-        console.log(location)
         criteria.loc = location;
         get_report()
       }
@@ -323,8 +324,10 @@
 
         var args = {};
         if (criteria.loc) {
-          args["latitude"] = round(criteria.loc.lat(), 4);
-          args["longitude"] = round(criteria.loc.lng(), 4)
+          args.latitude = round(criteria.loc.lat(), 4);
+          args.longitude = round(criteria.loc.lng(), 4);
+          args.distance = 1000;
+          args.limit = 1000;
         }
 
         if ("beds" in criteria) {
@@ -343,7 +346,6 @@
         }
 
         for (group of ["unit", "bldg"]) {
-          console.log(group);
           if (group in criteria) {
             args[group] = [];
             for (key in criteria[group]) {
@@ -364,7 +366,8 @@
           data: JSON.stringify(args),
           success: function (data) {
             //  Updates # matches label
-            document.getElementById('l_matches').innerHTML = data.listings.length + " matches";
+            document.getElementById('l_matches').innerHTML = 
+              data.listings.length + " listings within " + Math.round(data.radius) + " meters";
             //  Show report
             redraw({data : data});
             report = data;
@@ -423,8 +426,6 @@
       }
 
       function on_draw_overlay(data) {
-        console.log('drawing overlay')
-
         var zoom = map.getZoom();
         if (curLevel) {
           if (curLevel === levels[zoom]) {
@@ -494,6 +495,7 @@
 
         var listings = options.data.listings;
         var prediction = options.data.prediction;
+        var radius = options.data.radius;
         var duration = options.duration;
 
         //  Chart
@@ -638,9 +640,16 @@
             .attr("x", function(d) { return x(d.predict - d.std); })
             .attr("width", function(d) { return x(2 * d.std) - x(0); })
             meter_svg.style("display", "inline");
-          } else {
-            meter_svg.style("display", "none");
-          }
+        } else {
+          meter_svg.style("display", "none");
+        }
+
+        //  Map circle
+
+        if (circle != null && radius != 0.0) {
+          console.log(radius)
+          circle.setRadius(radius);
+        }
       }
 
       /*  Helper functions */
@@ -674,7 +683,7 @@
 
       /*  Show/move map marker */
 
-      function set_marker(loc) {
+      function set_marker(loc, radius=500) {
         if (marker == null) {
           marker = new google.maps.Marker({ map: map, position: loc });
         } else {
@@ -684,7 +693,7 @@
           var circle_params = {
             map: map,
             center: loc,
-            radius: 500, 
+            radius: radius, 
             strokeColor: '#0000FF', 
             strokeOpacity: 0.8, 
             strokeWeight: 1, 
