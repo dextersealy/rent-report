@@ -75,7 +75,7 @@ def find(criteria, fields):
         for r in result:
             r['_id'] = str(r['_id'])
 
-    print('\ncriteria = {}\nfields = {}\n{} results'.format(criteria, fields, len(result)))
+    print('\ncriteria = {}\nfields = {}\n{} results\n'.format(criteria, fields, len(result)))
     return result
 
 #   Predictor
@@ -129,6 +129,7 @@ def submit():
     #	Parse request
 
     data = flask.request.json
+    print(data)
 
     criteria = {
         'price' : { '$lt' : 1e5 }
@@ -142,16 +143,28 @@ def submit():
                 }
             }
 
-    if 'bedrooms' in data:
-        bedrooms = data['bedrooms']
-        criteria['bedrooms'] = bedrooms if bedrooms < 4 else { '$gte' : 4 }
+    if 'beds' in data:
+        l1 = filter(lambda x: x != 4, data['beds'])
+        l2 = filter(lambda x: x == 4, data['beds'])
+        q1 = { '$in' : l1 } if 1 < len(l1) else l1[0] if 1 == len(l1) else None
+        q2 = { '$gte' : l2[0] } if l2 else None
+        if q1 and q2:
+            criteria['$or'] = [{'bedrooms' : q1}, {'bedrooms' : q2}]
+        else:
+            criteria['bedrooms'] = q2 if q2 else q1
 
-    if 'bathrooms' in data:
-        bathrooms = data['bathrooms']
-        criteria['bathrooms'] = bathrooms if bathrooms < 3.0 else { '$gte' : 3.0 }
+    if 'bath' in data:
+        l1 = filter(lambda x: x != 3, data['bath'])
+        l2 = filter(lambda x: x == 3, data['bath'])
+        q1 = { '$in' : l1 } if 1 < len(l1) else l1[0] if 1 == len(l1) else None
+        q2 = { '$gte' : l2[0] } if l2 else None
+        if q1 and q2:
+            criteria['$or'] = [{'bathrooms' : q1}, {'bathrooms' : q2}]
+        else:
+            criteria['bathrooms'] = q2 if q2 else q1
 
     #   Get listings
-    
+
     listings = find(criteria, data.get('fields', ['loc', 'latitude', 'longitude', 'price']))
 
     #   Get Probability Distribution

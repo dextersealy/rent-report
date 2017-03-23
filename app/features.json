@@ -1,0 +1,52 @@
+{
+	"beds" : [
+		"Studio", "One", "Two", "Three", "Four or more"
+	],
+	"bath" : [
+		"1", "1.5", "2", "2.5", "3 or more"
+	],
+	"unit" : [
+		"dining room",
+		"dishwasher",
+		"eat in kitchen",
+		"exposed brick",
+		"fireplace",
+		"furnished",
+		"granite kitchen",
+		"hardwood floors",
+		"high ceilings",
+		"high speed internet",
+		"laundry in unit",
+		"marble bath",
+		"parking space",
+		"pre war",
+		"private outdoor space",
+		"renovated",
+		"stainless steel appliances",
+		"walk in closet"
+	],
+	"bldg" : [
+		"bike room",
+		"cats allowed",
+		"central air",
+		"common outdoor space",
+		"concierge",
+		"dogs allowed",
+		"doorman",
+		"elevator",
+		"fitness center",
+		"garage",
+		"green building",
+		"high rise",
+		"laundry room",
+		"live in super",
+		"lounge",
+		"new construction",
+		"no pets",
+		"pets allowed",
+		"playroom",
+		"swimming pool",
+		"wheelchair access"
+	]
+}
+	

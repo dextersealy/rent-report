@@ -7,27 +7,32 @@
     <meta name="viewport" content="initial-scale=1.0">
     <meta charset="utf-8">
     <style>
-      /* Always set the map height explicitly to define the size of the div
-       * element that contains the map. */
-      #map {
-        width: 100%;
-        height: 500px;
-      }
-      /* Optional: Makes the sample page fill the window. */
       html, body {
-        margin: 0px;
         padding: 10px;
       }
 
       strong, label, h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4, .h5, .h6 {
         font-family:"Roboto",sans-serif;
-        font-weight:500;
+        font-weight: 500;
+      }
+
+      /* Always set the map height explicitly to define the size of the div
+       * element that contains the map. */
+
+      .section-head {
+        margin-top:0pt;
+        margin-bottom:0pt;
+      }
+
+      #map {
+        width: 100%;
+        height: 650px;
       }
 
       #l_latlng {
         font-size: 8pt;
-        font-weight:300;
-        text-align:right;
+        font-weight: 300;
+        text-align: right;
       }
 
       .bar rect {
@@ -78,31 +83,24 @@
               <label for="address"">Address:</label>
               <input id="address" class="form-control" type="textbox" placeholder="New York, NY">
             </div>
-            <div class="form-group">
-              <label >Bedrooms:</label>
-              <div id="bedrooms">
-                <button id="br" type="button" class="btn btn-secondary" onclick="on_select('br', '')">Any</button>
-                <button id="br0" type="button" class="btn btn-secondary" onclick="on_select('br', '0')">Studio</button>
-                <button id="br1" type="button" class="btn btn-secondary" onclick="on_select('br', '1')">One</button>
-                <button id="br2" type="button" class="btn btn-secondary" onclick="on_select('br', '2')">Two</button>
-                <button id="br3" type="button" class="btn btn-secondary" onclick="on_select('br', '3')">Three</button>
-                <button id="br4" type="button" class="btn btn-secondary" onclick="on_select('br', '4')">Four or more</button>
-              </div>
+            <div style="margin-bottom:4pt" class="form-group">
+              <label class="section-head">Bedrooms:</label>
+              <div id="beds"></div>
+            </div>
+            <div style="margin-bottom:4pt" class="form-group">
+              <label class="section-head">Bathrooms:</label>
+              <div id="bath"></div>
+             </div>
+            <div style="margin-bottom:4pt" class="form-group">
+              <label class="section-head">Apartment:</label>
+              <div id="unit"></div>
             </div>
             <div class="form-group">
-              <label >Bathrooms:</label>
-              <div>
-                <button id="ba" type="button" class="btn btn-secondary" onclick="on_select('ba', '')">Any</button>
-                <button id="ba1" type="button" class="btn btn-secondary" onclick="on_select('ba', '1')">1</button>
-                <button id="ba1_5" type="button" class="btn btn-secondary" onclick="on_select('ba', '1_5')">1.5</button>
-                <button id="ba2" type="button" class="btn btn-secondary" onclick="on_select('ba', '2')">2</button>
-                <button id="ba2_5" type="button" class="btn btn-secondary" onclick="on_select('ba', '2_5')">2.5</button>
-                <button id="ba3" type="button" class="btn btn-secondary" onclick="on_select('ba', '3')">3 or more</button>
-              </div>
+              <label class="section-head">Building:</label>
+              <div id="bldg"></div>
             </div>
             <div class="form-group">
-              <button type="button" class="btn btn-primary" onclick="on_get_report()">Get Report
-              </button>
+              <button type="button" class="btn btn-primary" onclick="on_get_report()">Get Report</button>
             </div>
           </form>
           <div class="row">
@@ -125,10 +123,9 @@
     </div>
     <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
     <script src="http://d3js.org/d3.v4.min.js"></script>
-    <script src="underscore-min.js"></script>
-    <script src="stringutils.js"></script>
-    <script src="mapstyle.js"></script>
     <script src="d3.hexbin.min.js"></script>
+    <script src="underscore-min.js"></script>
+    <script src="mapstyle.js"></script>
     <script>
       var map = null;
       var auto_complete = null;
@@ -139,11 +136,11 @@
       var info_window = null;
       var place = null;
 
+      var buttons = {};
       var hist_svg = null;
       var meter_svg = null;
-
-      var criteria = { loc: null, br : null, ba : null };
-      var report = null;      
+      var report = null;    
+      var criteria = { loc: null };
 
       var overlay = null;
       var heat_svg = null;
@@ -153,6 +150,10 @@
       /*  Set up the page */
 
       function init() {
+
+        //  Start loading heat map
+
+        init_heat_map()
 
         //  Create map and center it on Times Square
 
@@ -179,14 +180,31 @@
         auto_complete = new google.maps.places.Autocomplete(input, options);
         google.maps.event.addListener(auto_complete, "place_changed", on_place_changed);
 
+        //  Create feature buttons
+
+        d3.json("features.json", function(error, button_groups) {
+          for (group_name in button_groups) {
+            button_titles = button_groups[group_name];
+            (function(group_name) {
+              d3.select("#" + group_name).selectAll("button")
+                .data(button_titles)
+                .enter().append("button")
+                .html(function(d) { return d; })
+                .attr("type", "button")
+                .attr("class", "btn btn-secondary btn-sm")
+                .attr("id", function(d) { return get_button_id(group_name, d); })
+                .style("margin-right", "2pt")
+                .style("margin-bottom", "2pt")
+                .style("padding", "3pt")
+                .on("click", function(d) { on_select(group_name, d) });
+              })(group_name);
+          }
+        });
+
         //  Listen for events
 
         window.addEventListener("resize", on_resize); // window resize
         map.addListener('click', on_map_click); // map click
-
-        //  Show the heat map
-
-        init_heat_map()
       }
 
       /*  Handle map click */
@@ -259,27 +277,23 @@
         get_report()
       }
 
-      /*  Handle criteria button press */
+      /*  Handle button press */
 
-      function on_select(setting, value) {
-
-        //  If already set, punt
-
-        if (criteria[setting] == value) {
-          return;
+      function on_select(group, title) {
+        if (!(group in criteria)) {
+          criteria[group] = {};
         }
-
-        //  Clear current selection
-
-        if (criteria[setting] != null) {
-          set_active("#" + setting + criteria[setting], false)
+        var active = false;
+        if (title in criteria[group]) {
+          delete criteria[group][title];
+          if (_.isEmpty(criteria[group])) {
+            delete criteria[group];
+          }
+        } else {
+          criteria[group][title] = 1;
+          active = true;
         }
-
-        //  Select button and generate the report
-
-        set_active("#" + setting + value, true);
-        criteria[setting] = value
-        get_report()
+        set_active("#" + get_button_id(group, title), active);
       }
 
       /*  Handle window resize */
@@ -312,11 +326,30 @@
           args["latitude"] = round(criteria.loc.lat(), 4);
           args["longitude"] = round(criteria.loc.lng(), 4)
         }
-        if (criteria.br) {
-          args["bedrooms"] = parseInt(criteria.br);
+
+        if ("beds" in criteria) {
+          args.beds = [];
+          var dict = { "Studio" : 0, "One" : 1, "Two" : 2, "Three" : 3, "Four or more" : 4}
+          for (key in criteria.beds) {
+            args.beds.push(dict[key]);
+          }
         }
-        if (criteria.ba) {
-          args["bathrooms"] = parseFloat(criteria.ba.replace("_", "."))
+
+        if ("bath" in criteria) {
+          args.bath = [];
+          for (key in criteria.bath) {
+            args.bath.push(parseFloat(key));
+          }
+        }
+
+        for (group of ["unit", "bldg"]) {
+          console.log(group);
+          if (group in criteria) {
+            args[group] = [];
+            for (key in criteria[group]) {
+              args[group].push(key);
+            }
+          }
         }
 
         //  Request report from server
@@ -625,11 +658,17 @@
         return [[get_component(0), get_component(1)].join(" "), get_component(2)].join(", ") 
       }
 
+      /*  Compose button id */
+      
+      function get_button_id(group, title) {
+        return group + "-" + title.replace(/ |\./g, '-');
+      }
+
       /*  Activate/Deactivate button */
 
       function set_active(id, active) {
         d3.select(id)
-          .attr("class", active ? "btn btn-primary active" : "btn btn-secondary")
+          .attr("class", active ? "btn btn-primary btn-sm active" : "btn btn-secondary btn-sm")
           .attr("aria-pressed", active ? "true" : "false")
       }
 
