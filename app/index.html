@@ -281,20 +281,48 @@
       /*  Handle button press */
 
       function on_select(group, title) {
+
+        //  Create button group
+
         if (!(group in criteria)) {
           criteria[group] = {};
         }
+
+        //  Treat beds/bath as radio group. Control key
+        //  reverses default behavior.
+
+        var radio = group == "beds" || group =="bath";
+        console.log(group, radio)
+        if (d3.event.ctrlKey) {
+          radio = !radio
+        }
+
+        //  If the button is set, unset it, else set it.
+        //  If it's a radiobutton group, unset the other
+        //  buttons.
+
         var active = false;
-        if (title in criteria[group]) {
-          delete criteria[group][title];
-          if (_.isEmpty(criteria[group])) {
+        var buttons = criteria[group]
+        if (title in buttons) {
+          delete buttons[title];
+          if (_.isEmpty(buttons)) {
             delete criteria[group];
           }
         } else {
-          criteria[group][title] = 1;
+          if (radio) {
+            for (btn in buttons) {
+              delete buttons[btn]
+              set_active("#" + get_button_id(group, btn), false);
+            }
+          }
+          buttons[title] = 1;
           active = true;
         }
+
+        //  Update the button and (re)run the report
+        
         set_active("#" + get_button_id(group, title), active);
+        get_report();
       }
 
       /*  Handle window resize */
@@ -327,7 +355,7 @@
           args.latitude = round(criteria.loc.lat(), 4);
           args.longitude = round(criteria.loc.lng(), 4);
           args.distance = 1000;
-          args.limit = 1000;
+          args.limit = 500;
         }
 
         if ("beds" in criteria) {
@@ -366,8 +394,11 @@
           data: JSON.stringify(args),
           success: function (data) {
             //  Updates # matches label
-            document.getElementById('l_matches').innerHTML = 
-              data.listings.length + " listings within " + Math.round(data.radius) + " meters";
+            var msg = data.listings.length + " listings";
+            if (data.radius > 0) {
+              msg += " within " + Math.round(data.radius) + " meters";
+            }
+            document.getElementById('l_matches').innerHTML = msg;
             //  Show report
             redraw({data : data});
             report = data;

@@ -37,7 +37,7 @@ flask_compress.Compress(app)
 
 mongo_collection = None
 canon = None
-top50 = None
+topFeatures = None
 
 #   Helper function to report memory usage
 
@@ -99,7 +99,7 @@ def get_features_matrix(list_or_iter):
         listings.append({})
         for f in features.lower().replace('-', ' ').split('\n'):
             f = canon.get(f, f)
-            if f in top50:
+            if f in topFeatures:
                 f_name = 'f_' + f.replace(' ', '_')
                 listings[-1][f_name] = 1    
     return pd.DataFrame.from_dict(listings).fillna(0)
@@ -124,19 +124,18 @@ def predict(obs, listings):
 
     #   Predict observation
 
-    print(obs)
     X.loc[0] = np.zeros(X.shape[1])
     X.loc[0, 'bedrooms'] = obs['beds'][0] if 'beds' in obs else 1.0
     X.loc[0, 'bathrooms'] = obs['bath'][0] if 'bath' in obs else 1.0
     for section in ['unit', 'bldg']:
         for feature in obs.get(section, []):
             col = 'f_' + feature.replace(' ', '_')
-            print(col)
             if col in X.columns:
                 X.loc[0, col] = 1.0
 
     for col in X:
-        print('{} : {}'.format(col, X.loc[0, col]))
+        if X.loc[0, col] != 0:
+            print('{} : {}'.format(col, X.loc[0, col]))
 
     y_pred = np.power(10, model.predict(X[:1]))[0]
     print("predicted: {}".format(y_pred))
@@ -239,7 +238,7 @@ def submit():
 
 def app_init():
     global canon
-    global top50
+    global topFeatures
 
     #   Load listings
 
@@ -252,7 +251,6 @@ def app_init():
 
     with open('synonyms.json') as fd:
         synomyns = json.load(fd)
-
     canon = {alias : term for s in synomyns for term, aliases in s.items() for alias in aliases}
 
     all_features = Counter()
@@ -260,8 +258,9 @@ def app_init():
     for l in df.features:
         unit_features = l.lower().replace('-', ' ').split('\n')
         all_features.update([canon.get(f, f) for f in unit_features if f])
+    del all_features['-']
 
-    top50 = dict(all_features.most_common(50))
+    topFeatures = dict(filter(lambda x: x[1] > 100, all_features.most_common()))
     print('{} features'.format(len(all_features)))
     del synomyns, df, all_features
 
