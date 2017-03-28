@@ -3,7 +3,7 @@
   <head>
     <link href='http://fonts.googleapis.com/css?family=Roboto:300,400,500' rel='stylesheet' type='text/css'>
     <link rel=stylesheet type=text/css href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.5/css/bootstrap.min.css" media="all">
-    <title>Rental Report</title>
+    <title>Rent Report</title>
     <meta name="viewport" content="initial-scale=1.0">
     <meta charset="utf-8">
     <style>
@@ -29,7 +29,7 @@
         height: 650px;
       }
 
-      #l_latlng {
+      .map-footer {
         font-size: 8pt;
         font-weight: 300;
         text-align: right;
@@ -83,25 +83,27 @@
               <label for="address"">Address:</label>
               <input id="address" class="form-control" type="textbox" placeholder="New York, NY">
             </div>
-            <div style="margin-bottom:4pt" class="form-group">
+            <div class="form-group" style="margin-bottom:4pt;">
               <label class="section-head">Bedrooms:</label>
               <div id="beds"></div>
             </div>
-            <div style="margin-bottom:4pt" class="form-group">
+            <div class="form-group" style="margin-bottom:4pt;">
               <label class="section-head">Bathrooms:</label>
               <div id="bath"></div>
              </div>
-            <div style="margin-bottom:4pt" class="form-group">
-              <label class="section-head">Apartment:</label>
+            <div class="form-group" style="margin-bottom:4pt; display:none;" id="unit-features">
+              <label class="section-head">Apartment Features:</label>
               <div id="unit"></div>
             </div>
-            <div class="form-group">
-              <label class="section-head">Building:</label>
+            <div class="form-group" style="display:none;" id="bldg-amenities">
+              <label class="section-head">Building Amenities:</label>
               <div id="bldg"></div>
             </div>
+<!-- 
             <div class="form-group">
               <button type="button" class="btn btn-primary" onclick="on_get_report()">Get Report</button>
             </div>
+ -->
           </form>
           <div class="row">
             <div id="hist"></div>
@@ -109,14 +111,14 @@
           <div class = "row">
             <div id="meter"></div>
           </div>
-          <div class="row">
-            <label id="l_matches"></label>
-          </div>
         </div>
         <div class="col-md-6">
           <div id="map"></div>
-          <div align="right">
-            <label id="l_latlng"></label>
+          <div style="float:left;">
+            <label class="map-footer" id="l_matches"></label>
+          </div>
+          <div style="float:right;">
+            <label class="map-footer" id="l_latlng"></label>
           </div>
         </div>
       </div>
@@ -151,9 +153,10 @@
 
       function init() {
 
-        //  Start loading heat map
+        //  Start loading heat map and report
 
         init_heat_map()
+        get_report()
 
         //  Create map and center it on Times Square
 
@@ -297,24 +300,27 @@
           radio = !radio
         }
 
+        //  If it's a radiobutton group, unset the other buttons.
+
+        var buttons = criteria[group]
+        if (radio) {
+          for (btn in buttons) {
+            if (btn != title) {
+              delete buttons[btn]
+              set_active("#" + get_button_id(group, btn), false);
+            }
+          }
+        }
+
         //  If the button is set, unset it, else set it.
-        //  If it's a radiobutton group, unset the other
-        //  buttons.
 
         var active = false;
-        var buttons = criteria[group]
         if (title in buttons) {
           delete buttons[title];
           if (_.isEmpty(buttons)) {
             delete criteria[group];
           }
         } else {
-          if (radio) {
-            for (btn in buttons) {
-              delete buttons[btn]
-              set_active("#" + get_button_id(group, btn), false);
-            }
-          }
           buttons[title] = 1;
           active = true;
         }
@@ -355,7 +361,7 @@
           args.latitude = round(criteria.loc.lat(), 4);
           args.longitude = round(criteria.loc.lng(), 4);
           args.distance = 1000;
-          args.limit = 500;
+          args.limit = 1000;
         }
 
         if ("beds" in criteria) {
@@ -380,6 +386,14 @@
               args[group].push(key);
             }
           }
+        }
+
+
+        //  Show feature buttons
+
+        if (criteria.loc) {
+          d3.select("#unit-features").style("display", "block");
+          d3.select("#bldg-amenities").style("display", "block");
         }
 
         //  Request report from server
@@ -456,26 +470,21 @@
         });
       }
 
+      var bounds = null;
       function on_draw_overlay(data) {
         var zoom = map.getZoom();
-        if (curLevel) {
-          if (curLevel === levels[zoom]) {
-            return
-          }
-          curLevel.attr("style", "display:none;")
+        if (!(curLevel == levels[zoom])) {
+          curLevel.style("display", "none");
+          curLevel = null;
         }
 
-        if (zoom in levels) {
-          curLevel = levels[zoom];
-          curLevel.style("display", "inline");
-          return;
+        if (!bounds) {
+          bounds = new google.maps.LatLngBounds();
+          d3.map(data.listings, function(d) {
+            var latlng = new google.maps.LatLng(d.latitude, d.longitude);
+            bounds.extend(latlng);
+          });
         }
-
-        var bounds = new google.maps.LatLngBounds();
-        d3.map(data.listings, function(d) {
-          var latlng = new google.maps.LatLng(d.latitude, d.longitude);
-          bounds.extend(latlng);
-        });
 
         var projection = overlay.getProjection();
         var bottomLeft = projection.fromLatLngToContainerPixel(bounds.getSouthWest());
@@ -483,15 +492,29 @@
         var sizeX = topRight.x - bottomLeft.x;
         var sizeY = bottomLeft.y - topRight.y;
 
-        var hexRadius = 5; 
-        var layout = d3.hexbin().radius(hexRadius);
-        var cscale = d3.scaleLinear().domain([1000, 5000]).range(["#00FF00", "#FFA500"]);
+        console.log(round(bottomLeft.x, 0), round(topRight.y, 0))
 
         heat_svg
           .attr("width", Math.abs(sizeX))
           .attr("height",  Math.abs(sizeY))
-          .style("margin-left", bottomLeft.x)
+          .style("margin-left", bottomLeft.x) 
           .style("margin-top", topRight.y);
+
+        if (levels[zoom]) {
+          curLevel = levels[zoom];
+          curLevel.style("display", "inline");
+          return;
+        }
+
+        var hexRadius = round(
+          projection.fromLatLngToDivPixel(new google.maps.LatLng(40.7642, -73.9951)).x -
+          projection.fromLatLngToDivPixel(new google.maps.LatLng(40.7642, -73.9960)).x, 0);
+
+        var layout = d3.hexbin().radius(hexRadius);
+        var avg_price = d3.mean(data.listings, function(d) { return d.price; });
+        var cscale = d3.scaleLinear()
+          .domain([600, avg_price, 10000])
+          .range(["#00FF00", "#FFA500", "#FF0000"]);
 
         curLevel = levels[zoom] = heat_svg.append("g")
           .attr("class", "zoom-" + zoom)
@@ -650,8 +673,6 @@
                 .ticks(d3.range(xMin, xMax, 200))
                 .tickSize(-meter_params.height)
                 .tickFormat(function() { return null; }));
-          // .selectAll(".tick")
-          //   .classed("tick--minor", function(d) { return d.getHours(); });
 
           meter_svg.append("rect")
             .attr("rx", 0)
@@ -662,6 +683,10 @@
             .attr("height", height)
             .attr("opacity", 0.5)
             .style("fill", "darkorange")
+
+          meter_svg.append("text")
+            .attr("y", margin.top + height / 2)
+            .attr("text-anchor", "middle")
         }
 
         if (prediction) {
@@ -669,8 +694,15 @@
             .data([prediction])
             .transition().duration(duration)
             .attr("x", function(d) { return x(d.predict - d.std); })
-            .attr("width", function(d) { return x(2 * d.std) - x(0); })
-            meter_svg.style("display", "inline");
+            .attr("width", function(d) { return x(2 * d.std) - x(0); });
+
+          meter_svg.selectAll("text")
+            .data([prediction])
+            .text(function(d) { return "$" + d.predict; })
+            .transition().duration(duration)
+            .attr("x", function(d) { return x(d.predict); });
+
+          meter_svg.style("display", "inline");
         } else {
           meter_svg.style("display", "none");
         }
