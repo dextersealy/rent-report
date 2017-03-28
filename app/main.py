@@ -15,7 +15,7 @@ import statsmodels.api as sm
 import time
 
 from collections import Counter
-from sklearn.linear_model import ElasticNetCV
+from sklearn.linear_model import RidgeCV
 from statsmodels.sandbox.regression.predstd import wls_prediction_std
 from vincenty import vincenty
 
@@ -110,7 +110,7 @@ def predict(obs, listings):
     #   Put listings in DataFrame
 
     columns = ['bedrooms', 'bathrooms', 'features', 'price']
-    df = pd.DataFrame([[listing[col] for col in columns] for listing in listings], columns=columns)
+    df = pd.DataFrame([[listing[col] for col in columns] for listing in listings], columns=columns).dropna()
     df = df.join(get_features_matrix(df.features)).drop('features', axis=1)
     print('{} rows, {} columns'.format(df.shape[0], df.shape[1]))
 
@@ -118,7 +118,7 @@ def predict(obs, listings):
 
     X = df.drop('price', axis=1)
     y = df['price']
-    model = ElasticNetCV(cv=3)
+    model = RidgeCV(cv=3)
     model.fit(X, np.log10(y))
     resid = np.power(10, model.predict(X)) - y
 
@@ -244,7 +244,7 @@ def app_init():
 
     global mongo_collection
     mongo_client = pymongo.MongoClient('ec2-34-198-246-43.compute-1.amazonaws.com', 27017)
-    mongo_collection = mongo_client.renthop.listings
+    mongo_collection = mongo_client.renthop2.listings
     print('{} listings'.format(mongo_collection.count()))
 
     #   Load features
@@ -254,7 +254,7 @@ def app_init():
     canon = {alias : term for s in synomyns for term, aliases in s.items() for alias in aliases}
 
     all_features = Counter()
-    df = pd.DataFrame(list(mongo_collection.find({}, ['features'])))
+    df = pd.DataFrame(list(mongo_collection.find({}, ['features']))).dropna()
     for l in df.features:
         unit_features = l.lower().replace('-', ' ').split('\n')
         all_features.update([canon.get(f, f) for f in unit_features if f])
