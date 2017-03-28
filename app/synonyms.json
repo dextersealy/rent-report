@@ -13,7 +13,7 @@
         "common terrace", "roofdeck", "building common outdoor space",
         "residents garden", "outdoor areas", "common roof deck",
         "courtyard", "common garden", "rooftop deck", "common backyard",
-        "rooftop terrace", "deck", "shared backyard"
+        "rooftop terrace", "deck", "shared backyard", "garden/courtyard"
     ]},
     {"concierge" : [
         "concierge service", "valet", "valet services", "24/7 concierge"
@@ -27,7 +27,10 @@
     {"garage" : [
         "on site garage", "common parking/garage", "on site parking lot",
         "parking", "full service garage", "valet parking", "on site parking",
-        "on site parking available"
+        "on site parking available", "garage parking", "parking available"
+    ]},
+    {"granite kitchen" : [
+        "granite kitchen counter"
     ]},
     {"hardwood floors" : [
         "hardwood"
@@ -39,25 +42,22 @@
         "hi rise", "highrise"
     ]},
     {"high speed internet" : [
-        "wifi access"
-    ]},
-    {"washer and dryer": [
-        "laundry in unit", "washer in unit", "dryer in unit", "washer/dryer", "washer & dryer",
-        "in unit washer/dryer", "washer/dryer in unit"
+        "wifi access", "verizon fios available"
     ]},
     {"laundry room": [
         "laundry in building", "laundry", "on site laundry", 
         "washer/dryer in building", "laundry on floor", 
-        "private laundry room on every floor"
+        "private laundry room on every floor", "laundry facility"
     ]},
     {"live in super" : [
         "live in superintendent", "live in super", "on site super"
     ]},
     {"lounge" : [
-        "residents lounge", "lounge room", "tenant lounge"
+        "residents lounge", "lounge room", "tenant lounge", "resident lounge",
+        "billiards", "billiards room", "media room"
     ]},
     {"pet friendly" : [
-        "pets allowed", "pets on approval", "cats allowed", "dogs allowed"
+        "pets allowed", "pets on approval", "cats allowed", "dogs allowed", "pets"
     ]},
     {"playroom" : [
         "children's playroom", "childrens playroom", "playroom/nursery"
@@ -77,14 +77,22 @@
     {"renovated" : [
         "newly renovated", "gut renovated"
     ]},
+    {"security system" : [
+        "gated entry", "secured entry", "secured access", "controlled access"
+    ]},
     {"swimming pool" : [
         "pool", "indoor pool", "outdoor pool"
     ]},
     {"storage" : [
-        "basement storage", "storage room"
+        "basement storage", "storage room", "storage facility", "storage space",
+        "storage available"
     ]},
     {"walk in closet" : [
         "walk in closet(s)"
+    ]},
+    {"washer and dryer": [
+        "laundry in unit", "washer in unit", "dryer in unit", "washer/dryer", "washer & dryer",
+        "in unit washer/dryer", "washer/dryer in unit", "washer"
     ]},
     {"wheelchair access" : [
         "wheelchair ramp"
