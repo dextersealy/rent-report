@@ -9,7 +9,7 @@ apartment.
 ![Rent Report screeshot](RentReport.png)
 
 I created this application to solve the problem where you are moving
-in New York and need to know what you should expect to pay, how
+in New York and need to know what you should expect to pay for rent, how
 different apartment and building features affect prices, and what is a
 good value.
 
