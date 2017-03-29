@@ -6,7 +6,7 @@ Metis' Data Science program. It is a web application that, given
 location, size, and features, predicts the rent for a New York
 apartment. 
 
-![Rent Report screeshot][RentReport.png]
+![Rent Report screeshot](RentReport.png)
 
 I created this application to solve the problem where you are moving
 in New York and need to know what you should expect to pay, how
