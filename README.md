@@ -9,7 +9,7 @@ apartment.
 ![Rent Report screeshot](RentReport.png)
 
 I created this application to solve the problem where you are moving
-in New York and need to know what you should expect to pay, how
+in New York and need to know what you should expect to pay for rent, how
 different apartment and building features affect prices, and what is a
 good value.
 
@@ -25,7 +25,7 @@ performance. For the application, I settled on an ElasticNet model
 with log<sub>10</sub> price as the target variable.
 
 The **app** folder contains the code for the **Rent Report**
-application that connects to the MongoDB database a uses the listings
+application that uses the MongoDB database
 to predict rents. 
 
 When you open Rent Report, it displays a heat map of all the listings
@@ -33,10 +33,10 @@ in the city (giving you a quick sense of the relative prices in
 different areas), and a chart showing the distribution of all rents.
 
 When you select an apartment size, it updates the chart to show the
-distribution of prices for just those size apartment. 
+distribution of prices for just those size apartments. 
 
 When you enter an address or location, or click on an area of the map,
 it updates the chart to reflect prices in that vicinity, and predicts
-the rent for that specific size apartment in that specific area. From
+the rent for the specific size apartment in that specific area. From
 there you can toggle feature buttons to explore how different building
 and apartment features affect the prediction.
