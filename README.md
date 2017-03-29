@@ -33,10 +33,10 @@ in the city (giving you a quick sense of the relative prices in
 different areas), and a chart showing the distribution of all rents.
 
 When you select an apartment size, it updates the chart to show the
-distribution of prices for just those size apartment. 
+distribution of prices for just those size apartments. 
 
 When you enter an address or location, or click on an area of the map,
 it updates the chart to reflect prices in that vicinity, and predicts
-the rent for that specific size apartment in that specific area. From
+the rent for the specific size apartment in that specific area. From
 there you can toggle feature buttons to explore how different building
 and apartment features affect the prediction.
