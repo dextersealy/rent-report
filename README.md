@@ -25,7 +25,7 @@ performance. For the application, I settled on an ElasticNet model
 with log<sub>10</sub> price as the target variable.
 
 The **app** folder contains the code for the **Rent Report**
-application that connects to the MongoDB database a uses the listings
+application that uses the MongoDB database
 to predict rents. 
 
 When you open Rent Report, it displays a heat map of all the listings
