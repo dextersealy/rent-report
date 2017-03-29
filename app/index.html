@@ -99,11 +99,6 @@
               <label class="section-head">Building Amenities:</label>
               <div id="bldg"></div>
             </div>
-<!-- 
-            <div class="form-group">
-              <button type="button" class="btn btn-primary" onclick="on_get_report()">Get Report</button>
-            </div>
- -->
           </form>
           <div class="row">
             <div id="hist"></div>
@@ -141,22 +136,17 @@
       var buttons = {};
       var hist_svg = null;
       var meter_svg = null;
-      var report = null;    
       var criteria = { loc: null };
 
       var overlay = null;
-      var heat_svg = null;
-      var curLevel = null;
-      var levels = {}
 
-      /*  Set up the page */
+      /*  Set up page */
 
       function init() {
 
-        //  Start loading heat map and report
+        //  Generate initial report
 
-        init_heat_map()
-        get_report()
+        rent_report(true)
 
         //  Create map and center it on Times Square
 
@@ -183,7 +173,7 @@
         auto_complete = new google.maps.places.Autocomplete(input, options);
         google.maps.event.addListener(auto_complete, "place_changed", on_place_changed);
 
-        //  Create feature buttons
+        //  Create (hidden) feature buttons
 
         d3.json("features.json", function(error, features) {
           for (section in features) {
@@ -211,6 +201,30 @@
 
         window.addEventListener("resize", on_resize); // window resize
         map.addListener('click', on_map_click); // map click
+      }
+
+      /*  Set up heatmap */
+
+      function init_heatmap(data) {
+        if (!overlay) {
+          overlay = new google.maps.OverlayView();
+
+          //  Set up callbacks
+
+          overlay.onAdd = function() {
+            d3.select(this.getPanes().overlayLayer)
+              .append("svg")
+              .attr("class", "hex")
+          };
+
+          overlay.draw = function() {
+            draw_heatmap(data);
+          };
+
+          //  Bind overlay to map
+
+          overlay.setMap(map);
+        }
       }
 
       /*  Handle map click */
@@ -245,10 +259,10 @@
           set_info_window(marker, info_address);
         });
 
-        //  Show the report
+        //  Generate the report
 
         criteria.loc = e.latLng;
-        get_report()
+        rent_report()
       }
 
       /*  Handle Address autocomplete */
@@ -275,10 +289,10 @@
         var lng = round(location.lng(), 4);
         document.getElementById("l_latlng").innerHTML = lat + ", " + lng;
 
-        //  Show the report
+        //  Generate the report
 
         criteria.loc = location;
-        get_report()
+        rent_report()
       }
 
       /*  Handle button press */
@@ -295,7 +309,6 @@
         //  reverses default behavior.
 
         var radio = group == "beds" || group =="bath";
-        console.log(group, radio)
         if (d3.event.ctrlKey) {
           radio = !radio
         }
@@ -325,10 +338,10 @@
           active = true;
         }
 
-        //  Update the button and (re)run the report
+        //  Update the button and generate the report
         
         set_active("#" + get_button_id(group, title), active);
-        get_report();
+        rent_report();
       }
 
       /*  Handle window resize */
@@ -343,16 +356,12 @@
 
         //  Redraw histogram 
 
-        redraw({ data : report, duration : 0 })
+        draw_report()
       }
 
-      /*  Handle report button */
+      /*  Generate rent report */
 
-      function on_get_report() {
-        get_report();
-      }
-
-      function get_report() {
+      function rent_report(init=false) {
 
         //  Collect report criteria
 
@@ -388,7 +397,6 @@
           }
         }
 
-
         //  Show feature buttons
 
         if (criteria.loc) {
@@ -407,15 +415,24 @@
           async: true,
           data: JSON.stringify(args),
           success: function (data) {
+
+            //  Show heat map
+            
+            if (init) {
+              init_heatmap(data);
+            }
+
             //  Updates # matches label
+
             var msg = data.listings.length + " listings";
             if (data.radius > 0) {
               msg += " within " + Math.round(data.radius) + " meters";
             }
             document.getElementById('l_matches').innerHTML = msg;
+
             //  Show report
-            redraw({data : data});
-            report = data;
+
+            draw_report(data);
           },
           error: function (result) {
             console.log("error:", result);
@@ -423,102 +440,73 @@
         });
       }
 
-      /*  Handle heatmap overlay */
+      /*  Draw heatmap */
 
-      function init_heat_map() {
+      var data_bounds = null;
+      function draw_heatmap(data) {
 
-        //  If already showing, punt
+        //  If map layer not initialized, punt
 
-        if (overlay) {
-          return
+        var svg = d3.select(".hex");
+        if (svg.empty()) {
+          return;
         }
 
-        //  Request data from server
+        //  Hide all heatmaps
 
-        $.ajax({
-          type: "POST",
-          contentType: "application/json; charset=utf-8",
-          url: "/submit",
-          dataType: "json",
-          async: true,
-          data: JSON.stringify({}),
-          success: function (data) {
+        svg.selectAll("heatmap")
+          .style("display", "none");
 
-            //  Create map overlay
+        //  Calculate bounds
 
-            overlay = new google.maps.OverlayView();
-
-            //  Set up callbacks
-
-            overlay.onAdd = function() {
-              heat_svg = d3.select(this.getPanes().overlayLayer)
-                .append("svg")
-                .attr("class", "hex")
-            };
-
-            overlay.draw = function() {
-              on_draw_overlay(data);
-            };
-
-            //  Bind overlay to map
-
-            overlay.setMap(map);
-          },
-          error: function (result) {
-            console.log("error:", result);
-          }
-        });
-      }
-
-      var bounds = null;
-      function on_draw_overlay(data) {
-        var zoom = map.getZoom();
-        if (!(curLevel == levels[zoom])) {
-          curLevel.style("display", "none");
-          curLevel = null;
-        }
-
-        if (!bounds) {
-          bounds = new google.maps.LatLngBounds();
+        if (!data_bounds) {
+          data_bounds = new google.maps.LatLngBounds();
           d3.map(data.listings, function(d) {
             var latlng = new google.maps.LatLng(d.latitude, d.longitude);
-            bounds.extend(latlng);
+            data_bounds.extend(latlng);
           });
         }
 
+        //  Set width, height and location of heatmap container
+
         var projection = overlay.getProjection();
-        var bottomLeft = projection.fromLatLngToContainerPixel(bounds.getSouthWest());
-        var topRight = projection.fromLatLngToContainerPixel(bounds.getNorthEast());
-        var sizeX = topRight.x - bottomLeft.x;
-        var sizeY = bottomLeft.y - topRight.y;
+        var sw = projection.fromLatLngToContainerPixel(data_bounds.getSouthWest());
+        var ne = projection.fromLatLngToContainerPixel(data_bounds.getNorthEast());
 
-        console.log(round(bottomLeft.x, 0), round(topRight.y, 0))
+        svg.attr("width", Math.abs(ne.x - sw.x))
+          .attr("height", Math.abs(sw.y - ne.y))
+          .style("margin-left", sw.x) 
+          .style("margin-top", ne.y);
 
-        heat_svg
-          .attr("width", Math.abs(sizeX))
-          .attr("height",  Math.abs(sizeY))
-          .style("margin-left", bottomLeft.x) 
-          .style("margin-top", topRight.y);
+        //  If heatmap for current zoom level exists, display it.
 
-        if (levels[zoom]) {
-          curLevel = levels[zoom];
-          curLevel.style("display", "inline");
+        var heatmap = svg.select("#zoom-" + map.getZoom());
+        if (!heatmap.empty()) {
+          heatmap.style("display", "inline");
           return;
         }
+
+        //  ... else create new heatmap for current zoom level.
+
+        heatmap = svg.append("g")
+          .attr("class", "heatmap")
+          .attr("id", "zoom-" + map.getZoom())
+          .attr("transform", "translate(" + -sw.x + "," + -ne.y + ")");
+
+        //  Calculate color scale
+
+        var avg_price = d3.mean(data.listings, function(d) { return d.price; });
+        var cscale = d3.scaleLinear()
+          .domain([600, avg_price, 10000])
+          .range(["#00FF00", "#FFA500", "#FF0000"]);
+
+        //  Calculate hex bins
 
         var hexRadius = round(
           projection.fromLatLngToDivPixel(new google.maps.LatLng(40.7642, -73.9951)).x -
           projection.fromLatLngToDivPixel(new google.maps.LatLng(40.7642, -73.9960)).x, 0);
 
         var layout = d3.hexbin().radius(hexRadius);
-        var avg_price = d3.mean(data.listings, function(d) { return d.price; });
-        var cscale = d3.scaleLinear()
-          .domain([600, avg_price, 10000])
-          .range(["#00FF00", "#FFA500", "#FF0000"]);
-
-        curLevel = levels[zoom] = heat_svg.append("g")
-          .attr("class", "zoom-" + zoom)
-          .attr("transform", "translate(" + -bottomLeft.x + "," + -topRight.y + ")");
 
         var hexData = d3.entries(data.listings).map(function(d) {
           var latlng = new google.maps.LatLng(d.value.latitude, d.value.longitude);
@@ -528,7 +516,9 @@
 
         var bins = layout(hexData);
 
-        curLevel.selectAll(".hexagon")
+        //  Create hexagons
+
+        heatmap.selectAll(".hexagon")
           .data(bins)
           .enter().append("path")
           .attr("class", "hexagon")
@@ -542,15 +532,22 @@
           .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
       }
 
-      /*  (Re)draw price chart */
+      /*  Draw rent report */
 
-      function redraw(options) {
-        _.defaults(options, { duration : 250 });
+      var prev_report = null;
+      function draw_report(data=null, duration=250) {
 
-        var listings = options.data.listings;
-        var prediction = options.data.prediction;
-        var radius = options.data.radius;
-        var duration = options.duration;
+        //  If no report, use the last one
+
+        if (!data) {
+          data = prev_report;
+        } else {
+          prev_report = data;
+        }
+
+        var listings = data.listings;
+        var prediction = data.prediction;
+        var radius = data.radius;
 
         //  Chart
 
@@ -689,6 +686,8 @@
             .attr("text-anchor", "middle")
         }
 
+        //  Meter prediction
+
         if (prediction) {
           meter_svg.selectAll("rect")
             .data([prediction])
@@ -710,7 +709,6 @@
         //  Map circle
 
         if (circle != null && radius != 0.0) {
-          console.log(radius)
           circle.setRadius(radius);
         }
       }
