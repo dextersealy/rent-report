@@ -16,13 +16,13 @@
         font-weight: 500;
       }
 
-      /* Always set the map height explicitly to define the size of the div
-       * element that contains the map. */
-
       .section-head {
         margin-top:0pt;
         margin-bottom:0pt;
       }
+
+      /* Always set the map height explicitly to define the size of the div
+       * element that contains the map. */
 
       #map {
         width: 100%;
@@ -35,13 +35,21 @@
         text-align: right;
       }
 
-      .bar rect {
-        shape-rendering: crispEdges;
+      .hexagon {
+        stroke: none;
+        opacity: 0.5;
+      }
+
+      .bar .rect-chosen {
+        fill: darkorange;
+      }
+
+      .bar .rect-normal {
         fill: steelblue;
       }
 
-      .bar text {
-        fill: #999999;
+      .bar rect:hover {
+       fill: lightblue;
       }
 
       .axis path, .axis line {
@@ -65,11 +73,46 @@
         stroke: #fff;
       }
 
-      .hexagon {
-        stroke: none;
-        opacity: 0.5;
+      .tooltip {
+        color: #222; 
+        background: #fff; 
+        padding: .5em; 
+        text-shadow: #f5f5f5 0 1px 0;
+        border-radius: 2px; 
+        box-shadow: 0px 0px 2px 0px #a6a6a6; 
+        opacity: 0.9; 
+        position: absolute;
       }
-      </style>
+
+      table {
+        font-size: 12px;
+        line-height: 12px;
+        margin-left: -14px;
+        table-layout: fixed;
+      }
+
+      th {
+        background-color:#E0E0E0;
+      }
+
+      .th-size {
+        width: 10%;
+      }
+      .th-price {
+        width: 10%;
+      }
+      .th-features {
+        width: 40%;
+      }
+      .th-url {
+        width: 40%;
+      }
+
+      tr:hover {
+        color:#000000;
+        background-color:#E0E0E0;
+     }
+   </style>
   </head>
   <body>
     <div class="container">
@@ -103,7 +146,7 @@
           <div class="row">
             <div id="hist"></div>
           </div>
-          <div class = "row">
+          <div class="row">
             <div id="meter"></div>
           </div>
         </div>
@@ -117,6 +160,11 @@
           </div>
         </div>
       </div>
+      <div class="row">
+        <div class="col-md-12">
+          <table class="table-condensed table-bordered" id="listings"></table>
+        </div>
+      </div>
     </div>
     <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
     <script src="http://d3js.org/d3.v4.min.js"></script>
@@ -124,21 +172,24 @@
     <script src="underscore-min.js"></script>
     <script src="mapstyle.js"></script>
     <script>
+
       var map = null;
-      var auto_complete = null;
+      var overlay = null;
       var geocoder = null;
+
       var marker = null;
       var circle = null;
-
       var info_window = null;
-      var place = null;
 
+      var auto_complete = null;
       var buttons = {};
+
       var hist_svg = null;
       var meter_svg = null;
-      var criteria = { loc: null };
+      var tip = null;
 
-      var overlay = null;
+      var place = null;
+      var criteria = { loc: null };
 
       /*  Set up page */
 
@@ -197,6 +248,11 @@
           }
         });
 
+        // Create (hidden) hover window  
+
+        tip = d3.select(".container").append("div")
+          .attr("class", "tooltip hidden");
+
         //  Listen for events
 
         window.addEventListener("resize", on_resize); // window resize
@@ -212,8 +268,7 @@
           //  Set up callbacks
 
           overlay.onAdd = function() {
-            d3.select(this.getPanes().overlayLayer)
-              .append("svg")
+            d3.select(this.getPanes().overlayLayer).append("svg")
               .attr("class", "hex")
           };
 
@@ -404,6 +459,10 @@
           d3.select("#bldg-amenities").style("display", "block");
         }
 
+        //  Hide listings table
+
+        hide_table();
+
         //  Request report from server
 
         console.log("POST", args);
@@ -422,7 +481,7 @@
               init_heatmap(data);
             }
 
-            //  Updates # matches label
+            //  Update "# matches" label
 
             var msg = data.listings.length + " listings";
             if (data.radius > 0) {
@@ -580,7 +639,8 @@
         var bins = d3.histogram()
           .domain(x.domain())
           .thresholds(d3.range(xMin, xMax, 200))
-          (listings.map(function(d) { return d.price; }));
+          .value(function(d) { return d.price; })
+          (listings);
 
         var y = d3.scaleLinear()
           .domain([0, d3.max(bins, function(d) { return d.length; })])
@@ -591,7 +651,15 @@
         .enter().append("g")
           .attr("class", "bar")
         .append("rect")
-          .attr("x", 1);
+          .attr("x", 1)
+          .attr("class", "rect-normal")
+          .on("mousemove", show_tip)
+          .on("mouseout", hide_tip)
+          .on("click", function(d) {
+            hist_svg.select(".rect-chosen").attr("class", "rect-normal");
+            d3.select(this).attr("class", "rect-chosen"); 
+            show_table(d); 
+          });
 
         bar.exit().remove();
 
@@ -663,21 +731,15 @@
           .append("g")
             .attr("transform", "translate(" + margin.left + "," + margin.right + ")");
 
-          meter_svg.append("g")
-            .attr("class", "axis axis--grid")
-            .attr("transform", "translate(0," + (meter_params.height + margin.top) + ")")
-            .call(d3.axisBottom(x)
-                .ticks(d3.range(xMin, xMax, 200))
-                .tickSize(-meter_params.height)
-                .tickFormat(function() { return null; }));
+          meter_svg.append("rect")
+            .attr("width", "100%")
+            .attr("y", margin.top)
+            .attr("height", meter_params.height)
+            .style("fill", "#ccc");
 
           meter_svg.append("rect")
-            .attr("rx", 0)
-            .attr("ry", 0)
-            .attr("x", 0)
-            .attr("y", 0)
-            .attr("width", 0)
-            .attr("height", height)
+            .attr("id", "slider")
+            .attr("height", "100%")
             .attr("opacity", 0.5)
             .style("fill", "darkorange")
 
@@ -689,17 +751,15 @@
         //  Meter prediction
 
         if (prediction) {
-          meter_svg.selectAll("rect")
-            .data([prediction])
+          meter_svg.select("#slider")
             .transition().duration(duration)
-            .attr("x", function(d) { return x(d.predict - d.std); })
-            .attr("width", function(d) { return x(2 * d.std) - x(0); });
+            .attr("x", function(d) { return x(prediction.predict - prediction.std); })
+            .attr("width", function(d) { return x(2 * prediction.std) - x(0); });
 
-          meter_svg.selectAll("text")
-            .data([prediction])
-            .text(function(d) { return "$" + d.predict; })
+          meter_svg.select("text")
+            .text(function(d) { return "$" + prediction.predict; })
             .transition().duration(duration)
-            .attr("x", function(d) { return x(d.predict); });
+            .attr("x", function(d) { return x(prediction.predict); });
 
           meter_svg.style("display", "inline");
         } else {
@@ -714,6 +774,79 @@
       }
 
       /*  Helper functions */
+
+      /* Show/hide listings table */
+
+      function show_table(data) {
+        var table = d3.select("#listings");
+        table.selectAll("thead").remove();
+        table.selectAll("tbody").remove();
+
+        var thead = table.append("thead").append('tr');
+        var tbody = table.append("tbody")
+
+        // Create header
+
+        columns = ["size", "price", "features", "url"];
+        thead.selectAll("th")
+          .data(columns)
+          .enter().append("th")
+          .attr("class", function(d) {return "th-" + d;})
+          .text(function (d) { return d; })
+
+         // Create a row for each object in the data
+
+        var rows = tbody.selectAll("tr")
+          .data(data)
+          .enter().append("tr");
+
+        // Create a cell in each row for each column
+
+        var cells = rows.selectAll("td")
+          .data(function (row) { 
+            return columns.map(function (column) {
+              var result = { column: column }
+              if (column == "size") {
+                var beds = row["bedrooms"];
+                result.value = (0 == beds) ? "Studio" : (beds + "BR" + ", " + row["bathrooms"] + "BA");
+              } else if (column == "features") {
+                result.value = (row[column] ? row[column].split("\n").join(", ") : null);
+              } else {
+                result.value = row[column];
+              }
+              return result;
+            }); 
+          })
+          .enter().append("td")
+          .attr("class", function(d) { return "cell-" + d.column; })
+          .text(function (d) { return (d.column == "url") ? null : d.value; });
+
+        rows.selectAll(".cell-url")
+          .append("a")
+          .attr("href", function(d) { return d.value; })
+          .attr("target", "_blank")
+          .text(function(d) { return d.value; })
+      }
+
+      function hide_table() {
+        var table = d3.select("#listings");
+        table.selectAll("thead").remove();
+        table.selectAll("tbody").remove();
+      }
+
+      /*  Show/hide tip */
+
+     function show_tip(d, i) {
+        var x = d3.event.pageX + 10;
+        var y = d3.event.pageY - 20;
+        tip.classed("hidden", false)
+          .attr("style", "left:" + x + "px; top:" + y+ "px;")
+          .html(d.length + ((1 == d.length) ? " listing" : " listings"));
+     }
+
+     function hide_tip(d, i) {
+        tip.classed("hidden", true);
+     }
 
       /*  Compose address for info popup */
 

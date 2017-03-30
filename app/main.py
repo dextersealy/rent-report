@@ -202,7 +202,7 @@ def submit():
 
     #   Get listings
 
-    columns = ['loc', 'latitude', 'longitude', 'price', 'bedrooms', 'bathrooms', 'features']
+    columns = ['loc', 'latitude', 'longitude', 'price', 'bedrooms', 'bathrooms', 'features', 'url']
     listings, radius = find(criteria, columns, data.get('limit', 0))
 
     #   Get Probability Distribution
@@ -228,9 +228,9 @@ def submit():
     
     start = time.time()
     result = flask.jsonify(prediction=prediction, listings=listings, radius=radius)
-    del listings, prices
-    
     print("elapsed time:", time.time() - start)
+
+    del listings, prices
     report_memory_usage()
     return result
 
