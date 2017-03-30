@@ -172,32 +172,18 @@
     <script src="underscore-min.js"></script>
     <script src="mapstyle.js"></script>
     <script>
-
       var map = null;
-      var overlay = null;
-      var geocoder = null;
-
-      var marker = null;
-      var circle = null;
-      var info_window = null;
-
       var auto_complete = null;
       var buttons = {};
-
-      var hist_svg = null;
-      var meter_svg = null;
-      var tip = null;
-
-      var place = null;
       var criteria = { loc: null };
 
       /*  Set up page */
 
       function init() {
 
-        //  Generate initial report
+        //  Generate (asynchronous) global report 
 
-        rent_report(true)
+        make_report(true)
 
         //  Create map and center it on Times Square
 
@@ -248,38 +234,10 @@
           }
         });
 
-        // Create (hidden) hover window  
-
-        tip = d3.select(".container").append("div")
-          .attr("class", "tooltip hidden");
-
         //  Listen for events
 
         window.addEventListener("resize", on_resize); // window resize
         map.addListener('click', on_map_click); // map click
-      }
-
-      /*  Set up heatmap */
-
-      function init_heatmap(data) {
-        if (!overlay) {
-          overlay = new google.maps.OverlayView();
-
-          //  Set up callbacks
-
-          overlay.onAdd = function() {
-            d3.select(this.getPanes().overlayLayer).append("svg")
-              .attr("class", "hex")
-          };
-
-          overlay.draw = function() {
-            draw_heatmap(data);
-          };
-
-          //  Bind overlay to map
-
-          overlay.setMap(map);
-        }
       }
 
       /*  Handle map click */
@@ -317,7 +275,7 @@
         //  Generate the report
 
         criteria.loc = e.latLng;
-        rent_report()
+        make_report()
       }
 
       /*  Handle Address autocomplete */
@@ -347,7 +305,7 @@
         //  Generate the report
 
         criteria.loc = location;
-        rent_report()
+        make_report()
       }
 
       /*  Handle button press */
@@ -396,11 +354,12 @@
         //  Update the button and generate the report
         
         set_active("#" + get_button_id(group, title), active);
-        rent_report();
+        make_report();
       }
 
       /*  Handle window resize */
 
+      var hist_svg = null;
       function on_resize() {
 
         //  If not showing histogram, punt
@@ -411,12 +370,12 @@
 
         //  Redraw histogram 
 
-        draw_report()
+        show_report()
       }
 
       /*  Generate rent report */
 
-      function rent_report(init=false) {
+      function make_report(global=false) {
 
         //  Collect report criteria
 
@@ -477,7 +436,7 @@
 
             //  Show heat map
             
-            if (init) {
+            if (global) {
               init_heatmap(data);
             }
 
@@ -491,7 +450,7 @@
 
             //  Show report
 
-            draw_report(data);
+            show_report(data);
           },
           error: function (result) {
             console.log("error:", result);
@@ -499,10 +458,34 @@
         });
       }
 
-      /*  Draw heatmap */
+      /*  Set up heatmap */
+
+      var overlay = null;
+      function init_heatmap(data) {
+        if (!overlay) {
+          overlay = new google.maps.OverlayView();
+
+          //  Set up callbacks
+
+          overlay.onAdd = function() {
+            d3.select(this.getPanes().overlayLayer).append("svg")
+              .attr("class", "hex")
+          };
+
+          overlay.draw = function() {
+            show_heatmap(data);
+          };
+
+          //  Bind overlay to map
+
+          overlay.setMap(map);
+        }
+      }
+
+      /*  Display heatmap */
 
       var data_bounds = null;
-      function draw_heatmap(data) {
+      function show_heatmap(data) {
 
         //  If map layer not initialized, punt
 
@@ -593,8 +576,9 @@
 
       /*  Draw rent report */
 
+      var meter_svg = null;
       var prev_report = null;
-      function draw_report(data=null, duration=250) {
+      function show_report(data=null, duration=250) {
 
         //  If no report, use the last one
 
@@ -657,7 +641,7 @@
           .on("mouseout", hide_tip)
           .on("click", function(d) {
             hist_svg.select(".rect-chosen").attr("class", "rect-normal");
-            d3.select(this).attr("class", "rect-chosen"); 
+            d3.select(this).attr("class", "rect-chosen");
             show_table(d); 
           });
 
@@ -667,6 +651,9 @@
           .data(bins)
           .transition().duration(duration)
           .attr("transform", function(d) { return "translate(" + x(d.x0) + "," + y(d.length) + ")"});
+
+        hist_svg.select(".rect-chosen")
+          .attr("class", "rect-normal");
 
         hist_svg.selectAll("rect")
           .data(bins)
@@ -766,14 +753,10 @@
           meter_svg.style("display", "none");
         }
 
-        //  Map circle
+        //  Resize map circle
 
-        if (circle != null && radius != 0.0) {
-          circle.setRadius(radius);
-        }
+        set_marker_radius(radius);
       }
-
-      /*  Helper functions */
 
       /* Show/hide listings table */
 
@@ -798,7 +781,9 @@
 
         var rows = tbody.selectAll("tr")
           .data(data)
-          .enter().append("tr");
+          .enter().append("tr")
+          .on("mousemove", show_dot)
+          .on("mouseout", hide_dot);
 
         // Create a cell in each row for each column
 
@@ -836,17 +821,50 @@
 
       /*  Show/hide tip */
 
-     function show_tip(d, i) {
+      var tip = null;
+      function show_tip(d, i) {
+        if (tip == null) {
+          tip = d3.select(".container").append("div")
+            .attr("class", "tooltip");
+        }
         var x = d3.event.pageX + 10;
         var y = d3.event.pageY - 20;
         tip.classed("hidden", false)
           .attr("style", "left:" + x + "px; top:" + y+ "px;")
           .html(d.length + ((1 == d.length) ? " listing" : " listings"));
-     }
+      }
 
-     function hide_tip(d, i) {
-        tip.classed("hidden", true);
-     }
+      function hide_tip(d, i) {
+        if (tip) {
+          tip.classed("hidden", true);
+        }
+      }
+
+      var dot = null;
+      function show_dot(d, i) {
+        var loc = new google.maps.LatLng(d.latitude, d.longitude);
+        if (dot == null) {
+          dot = new google.maps.Circle({
+            map: map,
+            center: loc,
+            radius: 50, 
+            strokeWeight: 0, 
+            fillColor: '#0000FF', 
+            fillOpacity: 0.5
+          });
+        } else {
+          dot.setCenter(loc);
+          dot.setMap(map);
+        }
+      }
+
+      function hide_dot(d, i) {
+        if (dot) {
+          dot.setMap(null);
+        }
+      }
+
+      /*  Helper functions */
 
       /*  Compose address for info popup */
 
@@ -877,32 +895,42 @@
 
       /*  Show/move map marker */
 
+      var marker = null;
+      var circle = null;
       function set_marker(loc, radius=500) {
         if (marker == null) {
-          marker = new google.maps.Marker({ map: map, position: loc });
+          marker = new google.maps.Marker({ 
+            map: map, 
+            position: loc 
+          });
         } else {
-          marker.setPosition(loc)
+          marker.setPosition(loc);
         }
         if (circle == null) {
-          var circle_params = {
+          circle = new google.maps.Circle({
             map: map,
             center: loc,
             radius: radius, 
-            strokeColor: '#0000FF', 
-            strokeOpacity: 0.8, 
-            strokeWeight: 1, 
+            strokeWeight: 0, 
             fillColor: '#0000FF', 
             fillOpacity: 0.15
-          }
-          circle = new google.maps.Circle(circle_params);
+          });
         } else {
           circle.setCenter(loc);
+          circle.setMap(loc);
         }
         return marker;
       }
 
+      function set_marker_radius(radius) {
+        if (circle != null && radius != 0.0) {
+          circle.setRadius(radius);
+        }
+      }
+
       /*  Set info window text and location */
 
+      var info_window = null;
       function set_info_window(marker, text) {
         if (text) {
           if (!info_window) {
@@ -917,6 +945,7 @@
 
       /*  Get Google Geocoder */
 
+      var geocoder = null;
       function get_geocoder() {
         if (geocoder == null) {
           geocoder = new google.maps.Geocoder();
