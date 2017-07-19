@@ -1,7 +1,7 @@
 # Deciphering the New York rental market
 
 This repository contains the presentation, Jupyter workbooks and
-Flask/D3/Javescript application I created for the fifth project in
+Flask/D3/Javascript application I created for the fifth project in
 Metis' Data Science program. It is a web application that, given
 location, size, and features, predicts the rent for a New York
 apartment. 
