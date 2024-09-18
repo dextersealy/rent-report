@@ -18,7 +18,7 @@ from RentHop.com from March 25 - 27, 2017. From each listing, I
 extracted the location (longitude and latitude), size (number of
 bedrooms and bathrooms), price, and apartment and building features.
 
-I stored the data in a MongoDB database running on and AWS instance,
+I stored the data in a MongoDB database running on an AWS instance,
 then used Python and the **scikit-learn** modules to test different
 linear regression models. The different algorithms were close in
 performance. For the application, I settled on an ElasticNet model
